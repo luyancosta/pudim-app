@@ -12,7 +12,7 @@ const firebaseConfig = {
 const ADMIN = 'luyan@pudim.com', VIEWER = 'beatriz@pudim.com';
 const LS = 'pudimDB_v2', LSV = 'pudimVersoes_v2';
 const EMP = { fantasia: 'Pudim Du Cariri', cnpj: '64.056.475/0001-82', tel: '(88) 99644-5147', pix: 'pudimducariri@gmail.com' };
-const KEYS = ['clientes', 'vendas', 'atacado', 'despesas', 'pagamentos', 'producoes', 'estoqueMov', 'ajustes', 'compras'];
+const KEYS = ['clientes', 'vendas', 'atacado', 'despesas', 'pagamentos', 'producoes', 'estoqueMov', 'ajustes', 'compras', 'sabores', 'itensExtra', 'eventos'];
 
 /* ============ HELPERS ============ */
 const $ = id => document.getElementById(id);
@@ -22,7 +22,8 @@ const hoje = () => { const t = new Date(); t.setMinutes(t.getMinutes() - t.getTi
 const R$ = v => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Math.abs(v) < 0.005 ? 0 : v);
 const fdata = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('pt-BR') : '-';
 const arr = o => !o ? [] : (Array.isArray(o) ? o : Object.values(o)).filter(Boolean);
-const uid = () => Date.now() + Math.floor(Math.random() * 1000);
+let _ult = 0;
+const uid = () => { let n = Date.now() * 1000; if (n <= _ult) n = _ult + 1; _ult = n; return n; }; // sempre crescente: mantém a ordem dos lançamentos
 const prox = a => a.length ? Math.max(...a.map(x => x.num || 0)) + 1 : 1;
 const difDias = (a, b) => Math.round((new Date(b) - new Date(a)) / 864e5);
 const gp = (o, p) => p.split('.').reduce((a, k) => a && a[k], o);
@@ -32,7 +33,7 @@ const bt = (t, fn, c = '') => `<button class="b sm ${c.includes('v') ? '' : 'adm
 const inp = (id, t, v = '', o = []) => t === 'select'
   ? `<select id="${id}">${o.map(x => `<option value="${x[0]}" ${String(x[0]) === String(v) ? 'selected' : ''}>${x[1]}</option>`).join('')}</select>`
   : `<input id="${id}" type="${t}" step="any" value="${v}">`;
-const tbl = (h, r, vz = 'Nada por aqui ainda.') => `<div class="tw"><table><thead><tr>${h.map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${r.length ? r.map(x => `<tr>${x.map(c => `<td>${c}</td>`).join('')}</tr>`).join('') : `<tr><td class="vz" colspan="${h.length}">${vz}</td></tr>`}</tbody></table></div>`;
+const tbl = (h, r, vz = 'Nada por aqui ainda.') => `<div class="tw"><table><thead><tr>${h.map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${r.length ? r.map(x => `<tr>${x.map((c, i) => `<td data-label="${h[i] || ''}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td class="vz" colspan="${h.length}">${vz}</td></tr>`}</tbody></table></div>`;
 const kpi = (t, v, cl = '') => `<div class="k ${cl}"><small>${t}</small><b>${v}</b></div>`;
 function toast(m, err) { const t = $('toast'); t.textContent = m; t.className = 'on' + (err ? ' err' : ''); clearTimeout(t._t); t._t = setTimeout(() => t.className = '', 3200); }
 function ask(titulo, campos, cb) {
@@ -53,7 +54,9 @@ const ITENS = {
   leite_po: ['Leite em Pó', 'g'], nutella: ['Nutella', 'g'], creme_leite: ['Creme de Leite', 'g'], chocolate_50: ['Chocolate 50%', 'g'], granulado: ['Granulado', 'g'],
   copo: ['Copos', 'un'], tampa: ['Tampas', 'un'], sacola_1: ['Sacola (1 un)', 'un'], sacola_2: ['Sacola (2 un)', 'un'], adesivo: ['Adesivos', 'un'], colher: ['Colheres', 'un']
 };
-const PRONTOS = Object.values(SP), EMB = ['copo', 'tampa', 'sacola_1', 'sacola_2', 'adesivo', 'colher'];
+const PRONTOS = { includes: k => k.startsWith('pudim') }, EMB = ['copo', 'tampa', 'sacola_1', 'sacola_2', 'adesivo', 'colher'];
+const ativo = k => !(db.config.inativos || {})[k];
+const minOf = k => (db.config.minimos || {})[k] ?? MIN[k] ?? (PRONTOS.includes(k) ? 5 : 0);
 const MIN = { pudim: 5, pudim_ninho: 5, pudim_brig: 5, leite_condensado: 3, leite_integral: 1000, ovos: 12, acucar: 500, leite_po: 300, nutella: 300, creme_leite: 300, chocolate_50: 200, granulado: 100, copo: 25, tampa: 25, sacola_1: 20, sacola_2: 15, adesivo: 25, colher: 25 };
 const REC = {
   tradicional: { rende: 6, prod: 'pudim', ins: { leite_condensado: 1, leite_integral: 400, ovos: 3, acucar: 200 } },
@@ -65,9 +68,9 @@ const UNOK = { g: ['kg', 'g'], ml: ['l', 'ml'], un: ['un', 'pct20'] };
 const FK = ['lc', 'li', 'ov', 'ac', 'cp', 'tp', 'ad', 'sc', 'co', 'lp', 'nt', 'cl', 'ch', 'gr'];
 const FL = ['Leite condensado (un)', 'Leite integral (litro)', 'Ovos (pacote c/ 20)', 'Açúcar (kg)', 'Copo (un)', 'Tampa (un)', 'Adesivo (un)', 'Sacola (un)', 'Colher (un)', 'Leite em pó (kg)', 'Nutella (kg)', 'Creme de leite (kg)', 'Chocolate 50% (kg)', 'Granulado (kg)'];
 const TABS = [
-  ['dashboard', '📊', 'Painel'], ['contagem', '🔢', 'Contagem mensal'], ['vendas', '🛒', 'Varejo (PDV)'], ['atacado', '📦', 'Pedidos atacado'],
-  ['clientes', '👥', 'Clientes'], ['receber', '⏳', 'A receber'], ['compras', '🧾', 'Compra direta'], ['precos', '📈', 'Histórico de preços'],
-  ['estoque', '🏭', 'Estoque e produção'], ['despesas', '💸', 'Despesas'], ['saques', '🏧', 'Saques'], ['config', '⚙️', 'Configurações']
+  ['dashboard', '📊', 'Painel'], ['estoque', '🏭', 'Estoque e produção'], ['vendas', '🛒', 'Varejo (PDV)'], ['atacado', '📦', 'Atacado'], ['clientes', '👥', 'Clientes'], ['eventos', '🎄', 'Eventos'],
+  ['receber', '⏳', 'A receber'], ['compras', '🧾', 'Compra direta'], ['precos', '📈', 'Histórico de preços'], ['contagem', '🔢', 'Contagem mensal'], ['rateio', '⚖️', 'Rateio'],
+  ['despesas', '💸', 'Despesas'], ['saques', '🏧', 'Saques'], ['config', '⚙️', 'Configurações']
 ];
 const CFG0 = {
   precoUnd: 15, precoCombo: 40, custoCopo: 1.5, taxaCredIns: 4.98, taxaCredApr: 3.09, taxaDebIns: 1.99, taxaDebApr: 0.89, taxaOnline: 2.99, diasAviso: 7,
@@ -77,10 +80,20 @@ const CFG0 = {
 };
 let db, role = 'viewer', email = '', carregou = false, ultimoTotal = 0, ultimoSync = {}, ultimoJSON = '', cart = [], edit = {};
 
+const PRE0 = { leite_condensado: 6.5, leite_integral: 4.5, ovos: 14, acucar: 4, copo: 1.5, tampa: 1.2, adesivo: .55, sacola: .9, colher: .2, leite_po: 40, nutella: 75, creme_leite: 10, chocolate_50: 60, granulado: 40 };
+const MAPF = { lc: 'leite_condensado', li: 'leite_integral', ov: 'ovos', ac: 'acucar', cp: 'copo', tp: 'tampa', ad: 'adesivo', sc: 'sacola', co: 'colher', lp: 'leite_po', nt: 'nutella', cl: 'creme_leite', ch: 'chocolate_50', gr: 'granulado' };
+const SAB0 = [
+  { id: 'tradicional', nome: 'Tradicional', rende: 6, adic: 0, prod: 'pudim', ins: { leite_condensado: 1, leite_integral: 400, ovos: 3, acucar: 200 } },
+  { id: 'ninho', nome: 'Ninho c/ Nutella', rende: 7, adic: 1, prod: 'pudim_ninho', ins: { leite_condensado: 1, leite_integral: 400, ovos: 3, leite_po: 130, nutella: 58.33, creme_leite: 58.33 } },
+  { id: 'brigadeirao', nome: 'Brigadeirão', rende: 7, adic: 0, prod: 'pudim_brig', ins: { leite_condensado: 1, leite_integral: 200, ovos: 3, creme_leite: 200, chocolate_50: 90, granulado: 35 } }
+];
 function carregar(d) {
   d = d || {}; const c = d.config || {}, i = c.insumo || {};
-  const o = { config: { ...CFG0, ...c, insumo: { varejo: { ...CFG0.insumo.varejo, ...i.varejo }, atacado: { ...CFG0.insumo.atacado, ...i.atacado } }, ficha: { ...CFG0.ficha, ...c.ficha }, abasViewer: { ...CFG0.abasViewer, ...c.abasViewer } } };
-  KEYS.forEach(k => o[k] = arr(d[k])); return o;
+  const fp = { ...PRE0 }; if (c.ficha) Object.entries(MAPF).forEach(([a, b]) => { if (c.ficha[a] !== undefined) fp[b] = c.ficha[a]; }); Object.assign(fp, c.fichaPrecos);
+  const o = { config: { ...CFG0, ...c, insumo: { varejo: { ...CFG0.insumo.varejo, ...i.varejo }, atacado: { ...CFG0.insumo.atacado, ...i.atacado } }, ficha: { ...CFG0.ficha, ...c.ficha }, abasViewer: { ...CFG0.abasViewer, ...c.abasViewer }, fichaPrecos: fp, inativos: { ...c.inativos }, minimos: { ...c.minimos }, itensNome: { ...c.itensNome } } };
+  KEYS.forEach(k => o[k] = arr(d[k]));
+  const ex = o.sabores; o.sabores = SAB0.map(b => ex.find(x => x.id === b.id) || JSON.parse(JSON.stringify(b))).concat(ex.filter(x => !SAB0.some(b => b.id === x.id)));
+  return o;
 }
 db = carregar(null);
 const total = d => KEYS.reduce((a, k) => a + arr(d[k]).length, 0);
@@ -99,12 +112,11 @@ function guardar(forcar) {
   const t = total(db);
   if (!forcar && ultimoTotal > 10 && t < ultimoTotal * 0.5) { db = carregar(JSON.parse(ultimoJSON)); updateAll(); return toast('Gravação bloqueada: os dados ficaram muito menores. Nada foi alterado.', 1); }
   versoes();
-  KEYS.concat('config').forEach(k => {
-    const j = JSON.stringify(db[k]);
-    if (j !== ultimoSync[k]) firebase.database().ref('pudimAppDB/' + k).set(JSON.parse(j)).then(() => { ultimoSync[k] = j; $('sync').classList.remove('off'); }).catch(e => { $('sync').classList.add('off'); toast('Erro ao salvar na nuvem: ' + e.code, 1); });
-  });
+  // UMA única gravação com tudo que mudou (várias gravações seguidas faziam a nuvem devolver dados antigos e apagar o resto)
+  const up = {}; KEYS.concat('config').forEach(k => { const j = JSON.stringify(db[k]); if (j !== ultimoSync[k]) { const v = JSON.parse(j); up[k] = Array.isArray(v) && !v.length ? null : v; } });
   ultimoTotal = t; ultimoJSON = JSON.stringify(db);
   try { localStorage.setItem(LS, ultimoJSON); } catch (e) { }
+  if (Object.keys(up).length) firebase.database().ref('pudimAppDB').update(up).then(() => $('sync').classList.remove('off')).catch(e => { $('sync').classList.add('off'); toast('Erro ao salvar na nuvem: ' + e.code, 1); });
   updateAll();
 }
 
@@ -118,8 +130,8 @@ const rateio = b => { const cg = b * .15, mo = b * .23, l = b - cg - mo; return 
 /* Atacado só entra nos números quando PAGO (mas conta no mês do pedido). */
 function linhasFin() {
   const L = [];
-  db.vendas.forEach(v => { const q = qtdTotal(v), ins = q * num(v.custoUnd), liq = num(v.liquido); L.push({ canal: 'varejo', data: v.data || '', q, bruto: num(v.bruto), liq, ins, ...rateio(liq - ins), sab: unid(v) }); });
-  db.atacado.filter(a => a.status === 'PAGO').forEach(a => { const ins = Math.max(0, num(a.qtd) * num(a.custoUnd) - num(a.copos) * db.config.custoCopo), liq = num(a.totalLiquido); L.push({ canal: 'atacado', data: a.data || '', q: num(a.qtd), bruto: num(a.totalBruto), liq, ins, ...rateio(liq - ins), sab: [[a.sabor, num(a.qtd)]] }); });
+  db.vendas.forEach(v => { const q = qtdTotal(v), ins = q * num(v.custoUnd), liq = num(v.liquido); L.push({ canal: v.evento ? 'evento' : 'varejo', ev: v.evento || '', data: v.data || '', q, bruto: num(v.bruto), liq, ins, ...rateio(liq - ins), sab: unid(v) }); });
+  db.atacado.filter(a => a.status === 'PAGO').forEach(a => { const ins = insAt(a), liq = num(a.totalLiquido); L.push({ canal: 'atacado', data: a.data || '', q: num(a.qtd), bruto: num(a.totalBruto), liq, ins, ...rateio(liq - ins), sab: atItens(a).map(i => [i.sabor, num(i.qtd)]) }); });
   return L;
 }
 function saldos() {
@@ -128,8 +140,8 @@ function saldos() {
   // Insumos baixam SOMENTE na receita; a receita já cria o pudim pronto.
   db.producoes.forEach(p => { const r = REC[p.sabor] || REC.tradicional, q = num(p.qtd); s[r.prod] += q * r.rende; for (const k in r.ins) s[k] -= q * r.ins[k]; ['copo', 'tampa', 'adesivo'].forEach(k => s[k] -= q * r.rende); });
   // Venda baixa o pudim pronto, a colher e a sacola (nunca os insumos de novo).
-  db.vendas.forEach(v => { unid(v).forEach(([sb, q]) => s[SP[sb] || 'pudim'] -= q); s.colher -= qtdTotal(v); if (v.sacTipo && v.sacTipo !== 'nenhuma') s[v.sacTipo] -= num(v.sacQtd); });
-  db.atacado.forEach(a => { s[SP[a.sabor] || 'pudim'] -= num(a.qtd); s.copo += num(a.copos); });
+  db.vendas.forEach(v => { unid(v).forEach(([sb, q]) => s[SP[sb] || 'pudim'] -= q); s.colher -= qtdTotal(v); if (v.evento) { const e = db.eventos.find(x => x.id === v.evento); if (e && e.itemEmb && s[e.itemEmb] !== undefined) s[e.itemEmb] -= num(e.embQtd) * qtdTotal(v); } if (v.sacTipo && v.sacTipo !== 'nenhuma') s[v.sacTipo] -= num(v.sacQtd); });
+  db.atacado.forEach(a => { atItens(a).forEach(i => s[SP[i.sabor] || 'pudim'] -= num(i.qtd)); s.copo += num(a.copos); });
   return s;
 }
 function caixas() {
@@ -156,23 +168,32 @@ const atrasado = a => a.status !== 'PAGO' && a.venc && a.venc < hoje();
 
 /* ============ CRUD GENÉRICO ============ */
 const optCli = () => db.clientes.filter(c => c.ativo !== 'nao').map(c => [c.id, c.nome]);
-const optSab = Object.entries(NS);
-const optIt = Object.entries(ITENS).map(([k, v]) => [k, v[0]]);
-const optComp = optIt.filter(([k]) => !PRONTOS.includes(k));
+const optSab = () => Object.entries(NS).filter(([k]) => ativo(SP[k]));
+const optIt = () => Object.entries(ITENS).filter(([k]) => ativo(k)).map(([k, v]) => [k, v[0]]);
+const optComp = () => optIt().filter(([k]) => !PRONTOS.includes(k));
 const SCH = {
   clientes: { t: 'Cliente', custom: 1, req: ['nome', 'tel'], f: [['nome', 'Nome do cliente', 'text'], ['tel', 'Telefone (com DDD)', 'tel'], ['endereco', 'Endereço (rua, número, bairro)', 'text'], ['cidade', 'Cidade', 'text'], ['uf', 'Estado (UF)', 'text'], ['prazo', 'Prazo de recompra em dias (vazio = padrão)', 'number'], ['obs', 'Observações', 'text']] },
   atacado: {
-    t: 'Pedido de atacado', f: [['data', 'Data do pedido', 'date'], ['clienteId', 'Cliente', 'select', optCli], ['sabor', 'Sabor', 'select', optSab], ['qtd', 'Quantidade', 'number'], ['unitario', 'Valor unitário (R$)', 'number'], ['copos', 'Copos devolvidos', 'number', null, 0], ['desconto', 'Desconto logística (vazio = automático)', 'number'], ['status', 'Status', 'select', [['NÃO PAGO', 'Pendente'], ['PAGO', 'Pago']]], ['venc', 'Vencimento (opcional)', 'date', null, '']],
-    h: ['#', 'Data', 'Cliente', 'Sabor', 'Qtd', 'Líquido', 'Status'],
-    r: a => ['#' + a.num, fdata(a.data), a.cliente, NS[a.sabor], a.qtd, R$(a.totalLiquido), `<span class="tag ${a.status === 'PAGO' ? 'ok' : 'no'}">${a.status === 'PAGO' ? 'Pago' : (atrasado(a) ? 'Atrasado' : 'Pendente')}</span>`],
+    t: 'Pedido de atacado', extra: () => `<h4>Sabores do pedido</h4><div id="at-itens"></div><div class="row"><button type="button" class="b sm" onclick="addItem()">+ Adicionar sabor</button></div>`,
+    f: [['data', 'Data do pedido', 'date'], ['clienteId', 'Cliente', 'select', optCli], ['copos', 'Copos devolvidos', 'number', null, 0], ['desconto', 'Desconto logística (vazio = automático)', 'number'], ['status', 'Status', 'select', [['NÃO PAGO', 'Pendente'], ['PAGO', 'Pago']]], ['venc', 'Vencimento (opcional)', 'date', null, '']],
+    h: ['#', 'Data', 'Cliente', 'Sabores', 'Qtd', 'Líquido', 'Status'],
+    r: a => ['#' + a.num, fdata(a.data), a.cliente, resumoAt(a), a.qtd, R$(a.totalLiquido), `<span class="tag ${a.status === 'PAGO' ? 'ok' : 'no'}">${a.status === 'PAGO' ? 'Pago' : (atrasado(a) ? 'Atrasado' : 'Pendente')}</span>`],
     ex: a => bt('📄 Recibo', `reciboPedido(${a.id})`, 'v') + (a.status !== 'PAGO' ? bt('💰 Receber', `receber(${a.id})`, 'ok') : ''),
     pre: o => {
       const c = db.clientes.find(x => x.id == o.clienteId); if (!c) { toast('Cadastre e escolha um cliente.', 1); return false; }
-      o.clienteId = c.id; o.cliente = c.nome; o.qtd = num(o.qtd); o.unitario = num(o.unitario); o.copos = num(o.copos);
-      if (!o.qtd || !o.unitario) { toast('Informe quantidade e valor.', 1); return false; }
+      o.itens = lerItens(); if (!o.itens.length) { toast('Adicione ao menos um sabor com quantidade e valor.', 1); return false; }
+      o.clienteId = c.id; o.cliente = c.nome; o.copos = num(o.copos);
+      o.qtd = o.itens.reduce((a, i) => a + i.qtd, 0); o.sabor = o.itens[0].sabor; o.unitario = o.itens[0].unitario;
       if (o.desconto === '') o.desconto = o.copos >= 12 ? o.copos : 0;
-      o.totalBruto = r2(o.qtd * o.unitario); o.totalLiquido = r2(o.totalBruto - o.desconto); o.custoUnd = o.custoUnd ?? custo(o.sabor, 'atacado');
+      o.totalBruto = r2(o.itens.reduce((a, i) => a + i.qtd * i.unitario, 0)); o.totalLiquido = r2(o.totalBruto - o.desconto);
     }
+  },
+  eventos: {
+    t: 'Evento', req: ['nome'], f: [['nome', 'Nome do evento (ex.: Natal 2026)', 'text'], ['ini', 'Início', 'date'], ['fim', 'Fim', 'date', null, ''], ['precoUnd', 'Preço da unidade no evento (R$)', 'number'], ['precoCombo', 'Preço base do combo no evento (R$)', 'number'], ['custoExtra', 'Custo extra de embalagem por pudim (R$)', 'number', null, 0], ['itemEmb', 'Embalagem especial (do estoque)', 'select', () => [['', '— nenhuma —'], ...optIt().filter(([k]) => !PRONTOS.includes(k))]], ['embQtd', 'Qtd da embalagem por pudim', 'number', null, 1]],
+    h: ['Evento', 'Período', 'Unidade', 'Combo', 'Embalagem extra', 'Situação'],
+    r: e => [`<b>${e.nome}</b>`, fdata(e.ini) + ' → ' + fdata(e.fim), R$(e.precoUnd), R$(e.precoCombo), R$(e.custoExtra) + (e.itemEmb && ITENS[e.itemEmb] ? ' + ' + ITENS[e.itemEmb][0] : ''), `<span class="tag ${e.encerrado ? 'no' : 'ok'}">${e.encerrado ? 'Encerrado' : 'Ativo'}</span>`],
+    ex: e => (e.encerrado ? '' : bt('🛒 Lançar vendas', `vendaEvento(${e.id})`, 'ok')) + bt(e.encerrado ? 'Reabrir' : 'Encerrar', `toggleEvento(${e.id})`),
+    pre: o => { o.precoUnd = num(o.precoUnd); o.precoCombo = num(o.precoCombo); o.custoExtra = num(o.custoExtra); o.embQtd = num(o.embQtd) || 1; if (!o.precoUnd) { toast('Informe o preço da unidade no evento.', 1); return false; } if (!o.precoCombo) o.precoCombo = o.precoUnd * 3; }
   },
   despesas: {
     t: 'Despesa', f: [['data', 'Data', 'date'], ['item', 'Descrição', 'text'], ['qtd', 'Qtd', 'number'], ['unitario', 'Valor unitário (R$)', 'number'], ['categoria', 'Categoria', 'select', [['INSUMOS', 'Insumos'], ['EMBALAGEM', 'Embalagem'], ['GASTOS GERAIS', 'Gastos gerais'], ['MARKETING', 'Marketing'], ['ENTREGADOR', 'Entregador']]]],
@@ -202,8 +223,9 @@ const SCH = {
     }
   }
 };
-const formHTML = l => { const s = SCH[l]; return `<div class="card"><h3>${edit[l] ? '✏️ Editando: ' : ''}${s.t}</h3><div class="fg">${s.f.map(([k, lb, t, o, d]) => `<div><label>${lb}</label>${inp(`f-${l}-${k}`, t, d !== undefined ? d : (t === 'date' ? hoje() : ''), typeof o === 'function' ? o() : o)}</div>`).join('')}</div><div class="row"><button class="b pri" onclick="salvar('${l}')">Salvar</button>${edit[l] ? `<button class="b" onclick="limpar('${l}')">Cancelar edição</button>` : ''}</div></div>`; };
-function limpar(l) { edit[l] = null; $('form-' + l).innerHTML = formHTML(l); }
+const formHTML = l => { const s = SCH[l]; return `<div class="card"><h3>${edit[l] ? '✏️ Editando: ' : ''}${s.t}</h3><div class="fg">${s.f.map(([k, lb, t, o, d]) => `<div><label>${lb}</label>${inp(`f-${l}-${k}`, t, d !== undefined ? d : (t === 'date' ? hoje() : ''), typeof o === 'function' ? o() : o)}</div>`).join('')}</div>${s.extra ? s.extra() : ''}<div class="row"><button class="b pri" onclick="salvar('${l}')">Salvar</button>${edit[l] ? `<button class="b" onclick="limpar('${l}')">Cancelar edição</button>` : ''}</div></div>`; };
+function renderForm(l) { $('form-' + l).innerHTML = formHTML(l); if (l === 'atacado' && !edit.atacado) addItem(); }
+function limpar(l) { edit[l] = null; renderForm(l); }
 function salvar(l) {
   const s = SCH[l], o = {};
   s.f.forEach(([k, , t]) => { const v = $(`f-${l}-${k}`).value; o[k] = t === 'number' ? (v === '' ? '' : num(v)) : v; });
@@ -213,10 +235,10 @@ function salvar(l) {
   if (s.pre && s.pre(n) === false) return;
   if (ant) Object.assign(ant, n); else db[l].push(n);
   if (s.pos) s.pos(n, !ant);
-  edit[l] = null; $('form-' + l).innerHTML = formHTML(l); guardar(); toast('Salvo!');
+  edit[l] = null; renderForm(l); guardar(); toast('Salvo!');
 }
 function editar(l, id) {
-  const x = db[l].find(i => i.id === id); if (!x) return; edit[l] = id; $('form-' + l).innerHTML = formHTML(l);
+  const x = db[l].find(i => i.id === id); if (!x) return; edit[l] = id; renderForm(l); if (l === 'atacado') atItens(x).forEach(i => addItem(i.sabor, i.qtd, i.unitario, i.custoUnd));
   SCH[l].f.forEach(([k]) => { const e = $(`f-${l}-${k}`); if (e) e.value = x[k] ?? ''; }); $('form-' + l).scrollIntoView({ behavior: 'smooth' });
 }
 function excluir(l, id) {
@@ -235,12 +257,12 @@ const lista = l => `<div class="adm" id="form-${l}"></div><div id="lista-${l}"><
 const H = {
   dashboard: () => `<div id="aviso-setup"></div><div class="card row" style="margin-top:0"><label style="margin:0">Mês:</label><input type="month" id="dash-mes" style="width:170px" onchange="rDash()"><button class="b" onclick="$('dash-mes').value='';rDash()">Todos</button></div><div id="dash-body"></div>`,
   contagem: () => `<div id="cont-body"></div>`,
-  vendas: () => `<div class="card adm"><h3>1. Montar pedido</h3><div class="fg">
+  vendas: () => `<div class="card adm"><h3>1. Montar pedido</h3><div id="pv-evinfo"></div><div class="fg"><div><label>Evento</label><select id="pv-ev" onchange="pdvEv()"><option value="">Venda normal (varejo)</option></select></div>
     <div><label>Produto</label><select id="pv-prod" onchange="pdvTog()"><option>Unidade</option><option>Combo</option></select></div>
-    <div id="pv-sab1"><label>Sabor</label><select id="pv-sab">${optSab.map(x => `<option value="${x[0]}">${x[1]}</option>`).join('')}</select></div>
+    <div id="pv-sab1"><label>Sabor</label><select id="pv-sab">${optSab().map(x => `<option value="${x[0]}">${x[1]}</option>`).join('')}</select></div>
     <div><label>Qtd</label><input id="pv-qtd" type="number" value="1" min="1" oninput="pdvPrev()"></div>
     <div><label>Valor manual (vazio = automático)</label><input id="pv-man" type="number" step="any" oninput="pdvPrev()"></div></div>
-    <div id="pv-combo" hidden><label>Sabores do combo (Ninho +R$ 1,00 cada)</label><div class="fg">${[1, 2, 3].map(i => `<select id="pv-s${i}" onchange="pdvPrev()">${optSab.map(x => `<option value="${x[0]}">${x[1]}</option>`).join('')}</select>`).join('')}</div></div>
+    <div id="pv-combo" hidden><label>Sabores do combo (sabores com adicional somam ao valor)</label><div class="fg">${[1, 2, 3].map(i => `<select id="pv-s${i}" onchange="pdvPrev()">${optSab().map(x => `<option value="${x[0]}">${x[1]}</option>`).join('')}</select>`).join('')}</div></div>
     <div class="row"><button class="b pri" onclick="pdvAdd()">Adicionar ao carrinho</button><b id="pv-prev"></b></div></div>
     <div id="pv-cart"></div>
     <div class="card adm"><h3>2. Pagamento</h3><div class="fg">
@@ -259,6 +281,8 @@ const H = {
   compras: () => lista('compras'), precos: () => `<div id="precos-body"></div>`,
   estoque: () => `<div class="grid" id="est-k"></div><div id="est-prev"></div><div class="fg"><div>${lista('producoes')}</div><div>${lista('estoqueMov')}</div></div>`,
   despesas: () => lista('despesas'), saques: () => lista('pagamentos'),
+  eventos: () => lista('eventos') + '<h4>Resultado por evento</h4><div id="ev-rel"></div>',
+  rateio: () => `<h4>Varejo</h4><div id="rt-v"></div><h4>Atacado (pedidos pagos)</h4><div id="rt-a"></div>`,
   config: () => `<div id="cfg-body"></div>`
 };
 
@@ -268,9 +292,9 @@ const KB = (t, v, c) => kpi(t, R$(v), v < -0.004 ? 'neg ' + (c || '') : c || '')
 R.dashboard = () => rDash();
 function rDash() {
   const c = caixas(), m = $('dash-mes') ? $('dash-mes').value : '', L = linhasFin().filter(x => !m || x.data.startsWith(m));
-  const rc = recompra().filter(x => x.alerta), pend = db.atacado.filter(atrasado), sal = saldos(), baixos = Object.keys(MIN).filter(k => sal[k] <= MIN[k]);
-  $('aviso-setup').innerHTML = db.config.setupFeito || role !== 'admin' ? '' : `<div class="alert">Sistema novo: confira e aplique o <b>saldo inicial</b> em Configurações. <button class="b sm" onclick="irPara('config')">Abrir</button></div>`;
-  const cx = (t, k, ex) => `<div class="k ${c[k] < -0.004 ? 'neg' : ''}"><small>${t}</small><b>${R$(c[k])}</b><div class="row">${ex || ''}${bt('⚖️ Ajustar', `ajustar('${k}')`)}</div></div>`;
+  const rc = recompra().filter(x => x.alerta), pend = db.atacado.filter(atrasado), sal = saldos(), baixos = Object.keys(ITENS).filter(k => ativo(k) && sal[k] <= minOf(k));
+  $('aviso-setup').innerHTML = db.config.setupFeito || role !== 'admin' || db.ajustes.length ? '' : `<div class="alert">Sistema novo: confira e aplique o <b>saldo inicial</b> em Configurações. <button class="b sm" onclick="irPara('config')">Abrir</button></div>`;
+  const cx = (t, k, ex) => `<div class="k c-${k} ${c[k] < -0.004 ? 'neg' : ''}"><small>${t}</small><b>${R$(c[k])}</b><div class="row">${ex || ''}${bt('⚖️ Ajustar', `ajustar('${k}')`)}</div></div>`;
   const grp = can => { const l = L.filter(x => x.canal === can), s = k => l.reduce((a, x) => a + x[k], 0); return `<div class="grid">${kpi('Fat. bruto', R$(s('bruto')))}${kpi('Fat. líquido', R$(s('liq')))}${kpi('Qtd vendida', s('q'))}${KB('Insumo fixo', s('ins'))}${KB('Custos gerais', s('cg'))}${KB('Mão de obra', s('mo'))}${KB('Lucro líquido', s('l'), 'ok')}${kpi('Fundo empresa', R$(s('fundo')))}${kpi('Luyan', R$(s('lu')))}${kpi('Beatriz', R$(s('bea')))}</div>`; };
   $('dash-body').innerHTML = `
   ${rc.length ? `<div class="alert"><b>📞 Clientes para contatar (${rc.length})</b>${tbl(['Cliente', 'Último pedido', 'Dias', 'Ações'], rc.map(x => [x.c.nome, fdata(x.ult), `${x.dias} (aviso em ${x.lim})`, `<a class="b sm" target="_blank" href="${wpp(x.c)}">WhatsApp</a>` + bt('✔ Contatado hoje', `contatado(${x.c.id})`)]))}</div>` : ''}
@@ -278,22 +302,22 @@ function rDash() {
   ${baixos.length ? `<div class="alert"><b>📦 Estoque baixo:</b> ${baixos.map(k => ITENS[k][0]).join(', ')}</div>` : ''}
   <div class="grid"><div class="k big"><small>Dinheiro total disponível em conta</small><b>${R$(c.total)}</b><div class="row">${bt('⚖️ Ajustar caixa geral', `ajustar('Caixa Geral')`)}</div></div></div>
   <h4>Caixinhas</h4><div class="grid">${cx('Insumo fixo', 'Insumos')}${cx('Custos gerais', 'CG')}${cx('Mão de obra', 'MO', bt('Sacar', `sacar('MaoObra')`, 'red'))}${cx('Fundo empresa', 'Fundo')}${cx('Luyan', 'Luyan', bt('Sacar', `sacar('Luyan')`, 'red'))}${cx('Beatriz', 'Beatriz', bt('Sacar', `sacar('Beatriz')`, 'red'))}${cx('Gaveta entregas', 'Entrega')}</div>
-  <h4>Varejo ${m ? '(' + m + ')' : '(tudo)'}</h4>${grp('varejo')}<h4>Atacado pago</h4>${grp('atacado')}`;
+  <h4>Varejo ${m ? '(' + m + ')' : '(tudo)'}</h4>${grp('varejo')}<h4>Atacado pago</h4>${grp('atacado')}${L.some(x => x.canal === 'evento') ? '<h4>Eventos</h4>' + grp('evento') : ''}`;
   const n = rc.length + pend.length; $('bdg').innerHTML = n ? `<span class="bdg">${n}</span>` : '';
 }
 R.contagem = () => {
-  const M = {}; const g = m => M[m] ||= { t: 0, n: 0, b: 0, q: 0, br: 0, lq: 0, l: 0, d: 0 };
-  linhasFin().forEach(x => { const o = g(x.data.slice(0, 7) || 'Sem data'); x.sab.forEach(([s, q]) => { if (s === 'ninho') o.n += q; else if (s === 'brigadeirao') o.b += q; else o.t += q; }); o.q += x.q; o.br += x.bruto; o.lq += x.liq; o.l += x.l; });
+  const M = {}; const g = m => M[m] ||= { t: 0, n: 0, b: 0, x: 0, q: 0, br: 0, lq: 0, l: 0, d: 0 };
+  linhasFin().forEach(x => { const o = g(x.data.slice(0, 7) || 'Sem data'); x.sab.forEach(([s, q]) => { if (s === 'ninho') o.n += q; else if (s === 'brigadeirao') o.b += q; else if (s === 'tradicional') o.t += q; else o.x += q; }); o.q += x.q; o.br += x.bruto; o.lq += x.liq; o.l += x.l; });
   db.despesas.forEach(d => { g(d.data.slice(0, 7) || 'Sem data').d += num(d.total); });
   const mn = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-  $('cont-body').innerHTML = `<div class="card">Atacado conta no <b>mês do pedido</b>, mas só aparece aqui depois de marcado como <b>pago</b>.</div>` + tbl(['Mês', 'Tradicional', 'Ninho', 'Brigadeirão', 'Total vendido', 'Fat. bruto', 'Fat. líquido', 'Lucro líquido', 'Despesas'], Object.keys(M).sort().reverse().map(k => { const o = M[k], [y, mm] = k.split('-'); return [mm ? `<b>${mn[mm - 1]}/${y}</b>` : k, o.t, o.n, o.b, `<b>${o.q} un</b>`, R$(o.br), R$(o.lq), `<b style="color:var(--ok)">${R$(o.l)}</b>`, `<span class="neg">${R$(o.d)}</span>`]; }));
+  $('cont-body').innerHTML = `<div class="card">Atacado conta no <b>mês do pedido</b>, mas só aparece aqui depois de marcado como <b>pago</b>.</div>` + tbl(['Mês', 'Tradicional', 'Ninho', 'Brigadeirão', 'Outros sabores', 'Total vendido', 'Fat. bruto', 'Fat. líquido', 'Lucro líquido', 'Despesas'], Object.keys(M).sort().reverse().map(k => { const o = M[k], [y, mm] = k.split('-'); return [mm ? `<b>${mn[mm - 1]}/${y}</b>` : k, o.t, o.n, o.b, o.x, `<b>${o.q} un</b>`, R$(o.br), R$(o.lq), `<b style="color:var(--ok)">${R$(o.l)}</b>`, `<span class="neg">${R$(o.d)}</span>`]; }));
 };
-R.vendas = () => { $('lista-vendas').innerHTML = tbl(['#', 'Data', 'Produto', 'Sabores', 'Líquido', 'Pgto', ''], ordenar(db.vendas).slice(0, 80).map(v => ['#' + v.num, fdata(v.data), `${v.produto} (${v.qtd}x)`, nomeSab(v), R$(v.liquido), v.pgto, bt('🗑️', `excluir('vendas',${v.id})`, 'red')])); };
-R.atacado = () => { const s = $('f-atacado-clienteId'); if (s && !edit.atacado) { const v = s.value; s.innerHTML = optCli().map(x => `<option value="${x[0]}">${x[1]}</option>`).join(''); s.value = v; } rLista('atacado'); };
+R.vendas = () => { $('lista-vendas').innerHTML = tbl(['#', 'Data', 'Produto', 'Sabores', 'Líquido', 'Pgto', ''], ordenar(db.vendas).slice(0, 80).map(v => ['#' + v.num, fdata(v.data), `${v.produto} (${v.qtd}x)${v.evento ? ' 🎄' : ''}`, nomeSab(v), R$(v.liquido), v.pgto, bt('🗑️', `excluir('vendas',${v.id})`, 'red')])); };
+R.atacado = () => { const s = $('f-atacado-clienteId'); if (s && !edit.atacado) { const v = s.value; s.innerHTML = optCli().map(x => `<option value="${x[0]}">${x[1]}</option>`).join(''); if ([...s.options].some(o => o.value === v)) s.value = v; } rLista('atacado'); };
 R.clientes = () => {
   const rc = recompra(), n = rc.filter(x => x.alerta).length;
   $('clientes-tab').innerHTML = tbl(['Cliente', 'Telefone', 'Cidade/UF', 'Último pedido', 'Dias', 'Pedidos', 'Total comprado', 'Ticket médio', 'Sabor favorito', 'Ações'], db.clientes.map(c => {
-    const ps = db.atacado.filter(a => a.clienteId === c.id), tot = ps.reduce((a, x) => a + num(x.totalLiquido), 0), r = rc.find(x => x.c.id === c.id), sb = {}; ps.forEach(p => sb[p.sabor] = (sb[p.sabor] || 0) + num(p.qtd));
+    const ps = db.atacado.filter(a => a.clienteId === c.id), tot = ps.reduce((a, x) => a + num(x.totalLiquido), 0), r = rc.find(x => x.c.id === c.id), sb = {}; ps.forEach(p => atItens(p).forEach(i => sb[i.sabor] = (sb[i.sabor] || 0) + num(i.qtd)));
     const fav = Object.entries(sb).sort((a, b) => b[1] - a[1])[0];
     return [`<b>${c.nome}</b>${c.ativo === 'nao' ? ' <span class="tag no">inativo</span>' : ''}`, c.tel, [c.cidade, c.uf].filter(Boolean).join('/') || '-', r ? fdata(r.ult) : '-', r ? `<span class="tag ${r.alerta ? 'no' : 'ok'}">${r.dias}d</span>` : '-', ps.length, R$(tot), ps.length ? R$(tot / ps.length) : '-', fav ? NS[fav[0]] : '-',
     `<a class="b sm" target="_blank" href="${wpp(c)}">WhatsApp</a>` + bt('📜 Histórico', `histCliente(${c.id})`, 'v') + bt('📄 Recibo em aberto', `reciboAbertos(${c.id})`, 'v') + bt('✏️', `editar('clientes',${c.id})`) + bt(c.ativo === 'nao' ? 'Reativar' : 'Inativar', `toggleAtivo(${c.id})`)];
@@ -308,21 +332,21 @@ R.receber = () => {
 R.compras = () => rLista('compras');
 R.precos = () => {
   const h = [...db.compras].sort((a, b) => a.data < b.data ? -1 : a.data > b.data ? 1 : a.id - b.id), por = {}, hist = [];
-  h.forEach(c => { const l = por[c.item] ||= [], p = l[l.length - 1], v = p ? (c.precoRef - p) / p * 100 : null; l.push(c.precoRef); hist.push([fdata(c.data), ITENS[c.item][0], c.fornecedor || '-', R$(c.precoRef) + '/' + (ITENS[c.item][1] === 'g' ? 'kg' : ITENS[c.item][1] === 'ml' ? 'L' : 'un'), v === null ? '-' : `<b class="${v > 0 ? 'neg' : ''}" style="${v < 0 ? 'color:var(--ok)' : ''}">${v > 0 ? '▲' : v < 0 ? '▼' : '='} ${Math.abs(v).toFixed(1)}%</b>`]); });
-  const res = Object.entries(por).map(([k, l]) => { const a = l[l.length - 1], p = l[l.length - 2], v = p ? (a - p) / p * 100 : null; return [ITENS[k][0], R$(a), p ? R$(p) : '-', v === null ? '-' : `${v > 0 ? '▲' : '▼'} ${Math.abs(v).toFixed(1)}%`, R$(Math.min(...l)), R$(Math.max(...l)), l.length]; });
+  h.forEach(c => { const l = por[c.item] ||= [], p = l[l.length - 1], v = p ? (c.precoRef - p) / p * 100 : null; l.push(c.precoRef); hist.push([fdata(c.data), ITENS[c.item][0], c.fornecedor || '-', R$(c.precoRef) + '/' + (ITENS[c.item][1] === 'g' ? 'kg' : ITENS[c.item][1] === 'ml' ? 'L' : 'un'), v === null ? '-' : `<b class="${v > 0 ? 'neg' : ''}" style="${v < 0 ? 'color:var(--ok)' : ''}">${v > 0 ? '▲' : v < 0 ? '▼' : '='} ${Math.abs(v).toFixed(1).replace('.', ',')}%</b>`]); });
+  const res = Object.entries(por).map(([k, l]) => { const a = l[l.length - 1], p = l[l.length - 2], v = p ? (a - p) / p * 100 : null; return [ITENS[k][0], R$(a), p ? R$(p) : '-', v === null ? '-' : `${v > 0 ? '▲' : '▼'} ${Math.abs(v).toFixed(1).replace('.', ',')}%`, R$(Math.min(...l)), R$(Math.max(...l)), l.length]; });
   $('precos-body').innerHTML = `<div class="card">Apenas acompanhamento. <b>Não altera</b> a Calculadora de Ficha Técnica.</div><h4>Resumo por item (preço por kg, litro ou unidade)</h4>${tbl(['Item', 'Atual', 'Anterior', 'Variação', 'Mínimo', 'Máximo', 'Compras'], res, 'Registre compras para ver a evolução.')}<h4>Todas as compras</h4>${tbl(['Data', 'Item', 'Fornecedor', 'Preço', 'Variação vs. compra anterior'], hist.reverse())}`;
 };
 function previsao() {
-  const lim = new Date(); lim.setDate(lim.getDate() - 28); const li = lim.toISOString().slice(0, 10), sal = saldos(), venda = { tradicional: 0, ninho: 0, brigadeirao: 0 };
-  db.vendas.filter(v => v.data >= li).forEach(v => unid(v).forEach(([s, q]) => venda[s] += q)); db.atacado.filter(a => a.data >= li).forEach(a => venda[a.sabor] += num(a.qtd));
-  const need = {}, rows = Object.keys(REC).map(s => { const r = REC[s], sem = venda[s] / 4, rec = Math.ceil(Math.max(0, sem - sal[r.prod]) / r.rende); for (const k in r.ins) need[k] = (need[k] || 0) + rec * r.ins[k]; ['copo', 'tampa', 'adesivo'].forEach(k => need[k] = (need[k] || 0) + rec * r.rende); return [NS[s], r2(sem), sal[r.prod], `<b>${rec}</b>`]; });
-  const compras = Object.keys(MIN).filter(k => !PRONTOS.includes(k)).map(k => { const falta = Math.max(0, (need[k] || 0) - sal[k]), baixo = sal[k] <= MIN[k] ? Math.max(0, MIN[k] * 2 - sal[k]) : 0, sug = Math.ceil(Math.max(falta, baixo)); return sug > 0 ? [ITENS[k][0], r2(sal[k]) + ' ' + ITENS[k][1], `<b>${sug} ${ITENS[k][1]}</b>`] : null; }).filter(Boolean);
+  const lim = new Date(); lim.setDate(lim.getDate() - 28); const li = lim.toISOString().slice(0, 10), sal = saldos(), venda = Object.fromEntries(Object.keys(REC).map(k => [k, 0]));
+  db.vendas.filter(v => v.data >= li).forEach(v => unid(v).forEach(([s, q]) => venda[s] += q)); db.atacado.filter(a => a.data >= li).forEach(a => atItens(a).forEach(i => venda[i.sabor] += num(i.qtd)));
+  const need = {}, rows = Object.keys(REC).filter(s => ativo(SP[s])).map(s => { const r = REC[s], sem = venda[s] / 4, rec = Math.ceil(Math.max(0, sem - sal[r.prod]) / r.rende); for (const k in r.ins) need[k] = (need[k] || 0) + rec * r.ins[k]; ['copo', 'tampa', 'adesivo'].forEach(k => need[k] = (need[k] || 0) + rec * r.rende); return [NS[s], r2(sem), sal[r.prod], `<b>${rec}</b>`]; });
+  const compras = Object.keys(ITENS).filter(k => ativo(k) && !PRONTOS.includes(k)).map(k => { const falta = Math.max(0, (need[k] || 0) - sal[k]), baixo = sal[k] <= minOf(k) ? Math.max(0, minOf(k) * 2 - sal[k]) : 0, sug = Math.ceil(Math.max(falta, baixo)); return sug > 0 ? [ITENS[k][0], r2(sal[k]) + ' ' + ITENS[k][1], `<b>${sug} ${ITENS[k][1]}</b>`] : null; }).filter(Boolean);
   return `<h4>Previsão de produção da semana (média das últimas 4 semanas)</h4>${tbl(['Sabor', 'Venda média/semana', 'Estoque pronto', 'Receitas a bater'], rows)}<h4>Lista de compras sugerida</h4>${tbl(['Item', 'Saldo', 'Comprar'], compras, 'Estoque suficiente para a previsão. ✅')}`;
 }
 R.estoque = () => {
   const s = saldos();
-  $('est-k').innerHTML = Object.keys(ITENS).map(k => { const v = r2(s[k]), c = v <= 0 ? 'neg' : ''; return `<div class="k ${c}" style="${v > 0 && v <= MIN[k] ? 'border-left-color:#F59E0B' : ''}"><small>${ITENS[k][0]}</small><b>${v} ${ITENS[k][1]}</b><div class="row">${bt('Contagem', `contar('${k}')`)}</div></div>`; }).join('');
-  $('est-prev').innerHTML = previsao(); rLista('producoes'); rLista('estoqueMov');
+  $('est-k').innerHTML = Object.keys(ITENS).filter(ativo).map(k => { const v = r2(s[k]), c = v <= 0 ? 'neg' : ''; return `<div class="k ${c}" style="${v > 0 && v <= minOf(k) ? 'border-left-color:#F59E0B' : ''}"><small>${ITENS[k][0]}</small><b>${v} ${ITENS[k][1]}</b><div class="row">${bt('Contagem', `contar('${k}')`)}</div></div>`; }).join('');
+  const ina = Object.keys(ITENS).filter(k => !ativo(k)); $('est-prev').innerHTML = (ina.length ? `<div class="card" style="color:var(--mu)">Inativos (fora dos alertas): ${ina.map(k => ITENS[k][0]).join(', ')}. Reative em Configurações.</div>` : '') + previsao(); rLista('producoes'); rLista('estoqueMov');
 };
 R.despesas = () => rLista('despesas'); R.saques = () => rLista('pagamentos');
 R.config = () => { }; // montada em rConfig() ao abrir a aba
@@ -339,19 +363,21 @@ function irPara(id) { switchTab(id); }
 
 /* PDV */
 function pdvTog() { const c = $('pv-prod').value === 'Combo'; $('pv-sab1').hidden = c; $('pv-combo').hidden = !c; pdvPrev(); }
-function pdvPreco() { let p = db.config.precoUnd; if ($('pv-prod').value === 'Combo') p = db.config.precoCombo + [1, 2, 3].filter(i => $('pv-s' + i).value === 'ninho').length; const m = num($('pv-man').value); return m > 0 ? m : p; }
+const evAtual = () => db.eventos.find(e => String(e.id) === String($('pv-ev').value)) || null;
+function pdvPreco() { const ev = evAtual(); let p = ev ? num(ev.precoUnd) : db.config.precoUnd; if ($('pv-prod').value === 'Combo') p = (ev ? num(ev.precoCombo) : db.config.precoCombo) + [1, 2, 3].reduce((a, i) => a + adic($('pv-s' + i).value), 0); const m = num($('pv-man').value); return m > 0 ? m : p; }
+function pdvEv() { cart = []; pdvCart(); pdvPrev(); const e = evAtual(); $('pv-evinfo').innerHTML = e ? `<div class="alert">🎄 <b>${e.nome}</b>: usando os preços e a embalagem deste evento.</div>` : ''; }
 function pdvPrev() { const q = num($('pv-qtd').value) || 1; $('pv-prev').textContent = `Valor: ${R$(pdvPreco())} × ${q} = ${R$(pdvPreco() * q)}`; }
 function pdvAdd() { const p = $('pv-prod').value, q = parseInt($('pv-qtd').value) || 1, cb = p === 'Combo' ? [1, 2, 3].map(i => $('pv-s' + i).value) : null; cart.push({ produto: p, sabor: cb ? cb[0] : $('pv-sab').value, saboresCombo: cb, qtd: q, bruto: pdvPreco() * q }); $('pv-qtd').value = 1; $('pv-man').value = ''; pdvPrev(); pdvCart(); }
 function pdvCart() { $('pv-cart').innerHTML = cart.length ? tbl(['Qtd', 'Produto', 'Sabores', 'Subtotal', ''], cart.map((i, n) => [i.qtd + 'x', i.produto, nomeSab(i), R$(i.bruto), bt('🗑️', `cart.splice(${n},1);pdvCart()`, 'red')])) : ''; pdvTot(); }
 function pdvTot() { $('pv-total').textContent = R$(Math.max(0, cart.reduce((a, i) => a + i.bruto, 0) - num($('pv-desc').value) + num($('pv-ent').value))); }
 function pdvFinal() {
   if (!cart.length) return toast('Carrinho vazio.', 1);
-  const C = db.config, pg = $('pv-pg').value, desc = num($('pv-desc').value), ent = num($('pv-ent').value), data = $('pv-data').value || hoje(), tb = cart.reduce((a, i) => a + i.bruto, 0);
+  const ev = evAtual(), C = db.config, pg = $('pv-pg').value, desc = num($('pv-desc').value), ent = num($('pv-ent').value), data = $('pv-data').value || hoje(), tb = cart.reduce((a, i) => a + i.bruto, 0);
   const tx = { 'Credito Insercao': C.taxaCredIns, 'Credito Aproximacao': C.taxaCredApr, 'Debito Insercao': C.taxaDebIns, 'Debito Aproximacao': C.taxaDebApr, 'Cartao Online': C.taxaOnline }[pg] || 0;
   let n = prox(db.vendas);
   cart.forEach((i, ix) => {
     const d = tb ? desc * i.bruto / tb : 0, cob = i.bruto - d, taxa = pg === 'PIX' ? ($('pv-asaas').checked && !ix ? 0.14 : 0) : cob * tx / 100, sabs = i.saboresCombo || [i.sabor];
-    db.vendas.push({ id: uid(), num: n++, data, produto: i.produto, sabor: i.sabor, saboresCombo: i.saboresCombo, qtd: i.qtd, pgto: pg, bruto: r2(i.bruto), desconto: r2(d), taxa: r2(taxa), liquido: r2(cob - taxa), entrega: ix ? 0 : r2(ent), sacTipo: ix ? 'nenhuma' : $('pv-sac').value, sacQtd: ix ? 0 : num($('pv-sacq').value), custoUnd: sabs.reduce((a, s) => a + custo(s, 'varejo'), 0) / sabs.length });
+    db.vendas.push({ id: uid(), num: n++, data, produto: i.produto, sabor: i.sabor, saboresCombo: i.saboresCombo, qtd: i.qtd, pgto: pg, bruto: r2(i.bruto), desconto: r2(d), taxa: r2(taxa), liquido: r2(cob - taxa), entrega: ix ? 0 : r2(ent), sacTipo: ix ? 'nenhuma' : $('pv-sac').value, sacQtd: ix ? 0 : num($('pv-sacq').value), custoUnd: sabs.reduce((a, s) => a + custo(s, 'varejo'), 0) / sabs.length + (ev ? num(ev.custoExtra) : 0), evento: ev ? ev.id : '' });
   });
   cart = []; pdvCart(); $('pv-desc').value = 0; $('pv-ent').value = 0; guardar(); toast('Venda finalizada!');
 }
@@ -371,18 +397,22 @@ async function recibo(cid, ids) {
   const lg = await logo(); let x0 = 14; if (lg) { d.addImage(lg.u, 'PNG', 14, 10, lg.w, lg.h); x0 = 14 + lg.w + 6; }
   d.setFont('helvetica', 'bold'); d.setFontSize(17); d.text(EMP.fantasia, x0, 18); d.setFont('helvetica', 'normal'); d.setFontSize(9);
   d.text(`CNPJ: ${EMP.cnpj}`, x0, 24); d.text(`Telefone: ${EMP.tel}  |  Pix (e-mail): ${EMP.pix}`, x0, 29);
-  d.setDrawColor(217, 119, 6); d.line(14, 40, 196, 40);
+  d.setDrawColor(194, 150, 80); d.line(14, 40, 196, 40);
   d.setFont('helvetica', 'bold'); d.setFontSize(14); d.text('RECIBO', 14, 50); d.setFont('helvetica', 'normal'); d.setFontSize(9);
   d.text(`No ${hoje().replace(/-/g, '')}-${ps[0].num}   Emitido em ${fdata(hoje())}`, 196, 50, { align: 'right' });
   d.text(`Cliente: ${c.nome}`, 14, 58); d.text(`Telefone: ${c.tel || '-'}`, 14, 63);
   d.text(`Endereco: ${[c.endereco, [c.cidade, c.uf].filter(Boolean).join('/')].filter(Boolean).join(' - ') || '-'}`.replace('Endereco', 'Endereço'), 14, 68);
-  let y = 80; d.setFillColor(15, 23, 42); d.rect(14, y - 5, 182, 8, 'F'); d.setTextColor(255); d.setFont('helvetica', 'bold');
-  [['Data', 16], ['Sabor', 36], ['Qtd', 100], ['Unit.', 114], ['Desc.', 134], ['Total', 154], ['Status', 176]].forEach(([t, x]) => d.text(t, x, y));
+  let y = 80; d.setFillColor(62, 31, 18); d.rect(14, y - 5, 182, 8, 'F'); d.setTextColor(255); d.setFont('helvetica', 'bold');
+  [['Data', 16], ['Sabor', 40], ['Qtd', 104], ['Unit.', 120], ['Subtotal', 146], ['Status', 176]].forEach(([t, x]) => d.text(t, x, y));
   d.setTextColor(0); d.setFont('helvetica', 'normal'); y += 8;
   ps.forEach(a => {
-    if (y > 265) { d.addPage(); y = 20; }
-    [[fdata(a.data), 16], [NS[a.sabor], 36], [String(a.qtd), 100], [R$(a.unitario), 114], [R$(a.desconto || 0), 134], [R$(a.totalLiquido), 154], [a.status === 'PAGO' ? 'PAGO' : 'PENDENTE', 176]].forEach(([t, x]) => d.text(t, x, y));
-    d.setDrawColor(226, 232, 240); d.line(14, y + 2, 196, y + 2); y += 8;
+    atItens(a).forEach(i => {
+      if (y > 265) { d.addPage(); y = 20; }
+      [[fdata(a.data), 16], [NS[i.sabor] || i.sabor, 40], [String(i.qtd), 104], [R$(i.unitario), 120], [R$(num(i.qtd) * num(i.unitario)), 146], [a.status === 'PAGO' ? 'PAGO' : 'PENDENTE', 176]].forEach(([t, x]) => d.text(t, x, y));
+      y += 6;
+    });
+    if (num(a.desconto) > 0) { d.text('Desconto logística', 40, y); d.text('-' + R$(a.desconto), 146, y); y += 6; }
+    d.setDrawColor(226, 232, 240); d.line(14, y - 2, 196, y - 2); y += 3;
   });
   const T = ps.reduce((a, p) => a + num(p.totalLiquido), 0), P = ps.filter(p => p.status === 'PAGO').reduce((a, p) => a + num(p.totalLiquido), 0);
   y += 4; if (y > 255) { d.addPage(); y = 20; }
@@ -394,32 +424,29 @@ async function recibo(cid, ids) {
 
 /* CONFIG */
 const CF = [['precoUnd', 'Preço da unidade'], ['precoCombo', 'Preço base do combo (3 un)'], ['custoCopo', 'Abatimento por copo devolvido'], ['taxaCredIns', 'Taxa crédito inserção %'], ['taxaCredApr', 'Taxa crédito aproximação %'], ['taxaDebIns', 'Taxa débito inserção %'], ['taxaDebApr', 'Taxa débito aproximação %'], ['taxaOnline', 'Taxa link de pagamento %']];
-const CI = [['insumo.varejo.tradicional', 'Insumo varejo — Tradicional'], ['insumo.varejo.ninho', 'Insumo varejo — Ninho'], ['insumo.varejo.brigadeirao', 'Insumo varejo — Brigadeirão'], ['insumo.atacado.tradicional', 'Insumo atacado — Tradicional'], ['insumo.atacado.ninho', 'Insumo atacado — Ninho'], ['insumo.atacado.brigadeirao', 'Insumo atacado — Brigadeirão']];
+const CIf = () => Object.keys(NS).flatMap(s => [['insumo.varejo.' + s, 'Insumo varejo — ' + NS[s]], ['insumo.atacado.' + s, 'Insumo atacado — ' + NS[s]]]);
 const SI_C = [['Insumos', 203.44], ['CG', 128.61], ['MO', 114.25], ['Fundo', -23.97], ['Luyan', 0], ['Beatriz', 71.34], ['Entrega', 78]];
 const SI_E = { pudim: 15, pudim_ninho: 16, pudim_brig: 0, leite_condensado: 22, leite_integral: 1550, ovos: 23, acucar: 900, leite_po: 200, nutella: 6608.55, creme_leite: 208.55, chocolate_50: 0, granulado: 0, copo: 5, tampa: 6, sacola_1: 0, sacola_2: 0, adesivo: 0, colher: 0 };
 function rConfig() {
   if (role !== 'admin') { $('cfg-body').innerHTML = '<div class="card">Somente o administrador acessa as configurações.</div>'; return; }
   const C = db.config, vers = JSON.parse(localStorage.getItem(LSV) || '[]');
   $('cfg-body').innerHTML = `
-  <div class="card"><h3>Preços, taxas e custos</h3><div class="fg">${CF.map(([k, l]) => `<div><label>${l}</label>${inp('c-' + k, 'number', C[k])}</div>`).join('')}${CI.map(([k, l]) => `<div><label>${l}</label>${inp('c-' + k, 'number', gp(C, k))}</div>`).join('')}
+  <div class="card"><h3>Preços, taxas e custos</h3><div class="fg">${CF.map(([k, l]) => `<div><label>${l}</label>${inp('c-' + k, 'number', C[k])}</div>`).join('')}${CIf().map(([k, l]) => `<div><label>${l}</label>${inp('c-' + k, 'number', gp(C, k))}</div>`).join('')}
   <div><label>Aviso de recompra (dias, padrão)</label>${inp('c-diasAviso', 'select', C.diasAviso, [[7, '7 dias'], [15, '15 dias']])}</div></div><div class="row"><button class="b pri" onclick="salvarCfg()">Salvar configurações</button></div></div>
-  <div class="card"><h3>Calculadora de ficha técnica</h3><p style="color:var(--mu)">Só muda os custos oficiais quando você clicar em aplicar. Compras novas não alteram nada aqui.</p><div class="fg">${FK.map((k, i) => `<div><label>${FL[i]}</label><input id="fc-${k}" type="number" step="any" value="${C.ficha[k]}" oninput="calcFicha()"></div>`).join('')}</div><div id="fc-res"></div><div class="row"><button class="b pri" onclick="aplicarFicha()">Aplicar custos nas tabelas varejo/atacado</button></div></div>
+  ${cfgFicha()}
   <div class="card"><h3>Abas que a Beatriz pode ver</h3><div class="fg">${TABS.filter(t => t[0] !== 'config').map(t => `<label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" id="av-${t[0]}" ${C.abasViewer[t[0]] ? 'checked' : ''}> ${t[2]}</label>`).join('')}</div><div class="row"><button class="b pri" onclick="salvarAbas()">Salvar permissões</button></div></div>
-  ${C.setupFeito ? '' : `<div class="card"><h3>Saldo inicial (valores dos prints — confira)</h3><div class="fg">${SI_C.map(([k, v]) => `<div><label>Caixinha ${k} (R$)</label>${inp('si-c-' + k, 'number', v)}</div>`).join('')}${Object.keys(SI_E).map(k => `<div><label>${ITENS[k][0]} (${ITENS[k][1]})</label>${inp('si-e-' + k, 'number', SI_E[k])}</div>`).join('')}</div><div class="row"><button class="b pri" onclick="aplicarSaldo()">Aplicar saldo inicial (uma vez)</button></div></div>`}
+  ${C.setupFeito || db.ajustes.length ? '' : `<div class="card"><h3>Saldo inicial (valores dos prints — confira)</h3><div class="fg">${SI_C.map(([k, v]) => `<div><label>Caixinha ${k} (R$)</label>${inp('si-c-' + k, 'number', v)}</div>`).join('')}${Object.keys(SI_E).map(k => `<div><label>${ITENS[k][0]} (${ITENS[k][1]})</label>${inp('si-e-' + k, 'number', SI_E[k])}</div>`).join('')}</div><div class="row"><button class="b pri" onclick="aplicarSaldo()">Aplicar saldo inicial (uma vez)</button></div></div>`}
+  ${cfgSabores()}
+  ${cfgItens()}
   <div class="card"><h3>Segurança dos dados</h3><div class="row"><button class="b" onclick="exportar()">Baixar backup (.json)</button><button class="b" onclick="$('imp').click()">Restaurar de arquivo</button><input type="file" id="imp" accept=".json" hidden onchange="importar(event)"></div>
+  <h4>Ajustes de caixa lançados (exclua duplicados aqui)</h4>${tbl(['Data', 'Caixinha', 'Valor', ''], ordenar(db.ajustes).map(x => [fdata(x.data), x.caixa, R$(x.valor), bt('🗑️', `excluir('ajustes',${x.id})`, 'red')]), 'Nenhum ajuste.')}
   <h4>Versões locais recentes</h4>${tbl(['Salva em', 'Registros', ''], vers.map((v, i) => [new Date(v.ts).toLocaleString('pt-BR'), total(JSON.parse(v.json)), bt('Restaurar', `restaurar(${i})`)]), 'Nenhuma versão ainda.')}</div>`;
-  calcFicha();
+  calcFicha(); sbForm();
 }
-function salvarCfg() { CF.concat(CI).forEach(([k]) => sp(db.config, k, num($('c-' + k).value))); db.config.diasAviso = num($('c-diasAviso').value); guardar(); toast('Configurações salvas.'); }
+function salvarCfg() { CF.concat(CIf()).forEach(([k]) => sp(db.config, k, num($('c-' + k).value))); db.config.diasAviso = num($('c-diasAviso').value); guardar(); toast('Configurações salvas.'); }
 function salvarAbas() { TABS.filter(t => t[0] !== 'config').forEach(t => db.config.abasViewer[t[0]] = $('av-' + t[0]).checked); guardar(); toast('Permissões salvas.'); }
-function calcFicha() {
-  const F = {}; FK.forEach(k => F[k] = num($('fc-' + k).value)); const { lc, li, ov, ac, cp, tp, ad, sc, co, lp, nt, cl, ch, gr } = F, n = 700 / 12, e = cp + tp + ad;
-  const at = { tradicional: (lc + .4 * li + 3 * ov / 20 + .2 * ac + 6 * e) / 6, ninho: (lc + .4 * li + 3 * ov / 20 + .13 * lp + n * (nt + cl) / 1000 + 7 * e) / 7, brigadeirao: (lc + .2 * li + 3 * ov / 20 + .2 * cl + .09 * ch + .035 * gr + 7 * e) / 7 };
-  window._fc = { F, at, va: { tradicional: at.tradicional + sc + co, ninho: at.ninho + sc + co, brigadeirao: at.brigadeirao + sc + co } };
-  $('fc-res').innerHTML = tbl(['Sabor', 'Atacado (un)', 'Varejo (un, c/ sacola e colher)'], Object.keys(NS).map(s => [NS[s], R$(at[s]), '<b>' + R$(window._fc.va[s]) + '</b>']));
-}
-function aplicarFicha() { calcFicha(); const f = window._fc; db.config.ficha = f.F; Object.keys(NS).forEach(s => { db.config.insumo.atacado[s] = r2(f.at[s]); db.config.insumo.varejo[s] = r2(f.va[s]); }); guardar(); rConfig(); toast('Custos aplicados.'); }
 function aplicarSaldo() {
+  if (db.config.setupFeito) return toast('O saldo inicial já foi aplicado.', 1);
   if (!confirm('Aplicar o saldo inicial? Faça isso só uma vez.')) return;
   SI_C.forEach(([k]) => { const v = num($('si-c-' + k).value); if (v) db.ajustes.push({ id: uid(), caixa: k, data: hoje(), valor: v }); });
   Object.keys(SI_E).forEach(k => { const v = num($('si-e-' + k).value); if (v > 0) db.estoqueMov.push({ id: uid(), data: hoje(), tipo: 'entrada', item: k, qtd: v, desc: 'Saldo inicial' }); });
@@ -431,6 +458,119 @@ function importar(ev) {
   r.onload = () => { try { const n = carregar(JSON.parse(r.result)); if (confirm(`Substituir os ${total(db)} registros atuais pelos ${total(n)} do arquivo?`)) { db = n; guardar(true); toast('Restaurado.'); } } catch (e) { toast('Arquivo inválido.', 1); } }; r.readAsText(f);
 }
 function restaurar(i) { const v = JSON.parse(localStorage.getItem(LSV) || '[]')[i]; if (v && confirm(`Restaurar versão de ${new Date(v.ts).toLocaleString('pt-BR')} (${total(JSON.parse(v.json))} registros)?`)) { db = carregar(JSON.parse(v.json)); guardar(true); rConfig(); } }
+
+/* ============ ATACADO MULTI-SABOR, SABORES NOVOS, RATEIO ============ */
+const atItens = a => a.itens && a.itens.length ? a.itens : [{ sabor: a.sabor, qtd: a.qtd, unitario: a.unitario, custoUnd: a.custoUnd }];
+const resumoAt = a => atItens(a).map(i => `${i.qtd}x ${NS[i.sabor] || i.sabor}`).join(' + ');
+const insAt = a => Math.max(0, atItens(a).reduce((s, i) => s + num(i.qtd) * num(i.custoUnd), 0) - num(a.copos) * db.config.custoCopo);
+const adic = s => num((db.sabores.find(x => x.id === s) || {}).adic);
+function addItem(s, q, u, c) {
+  const d = document.createElement('div'); d.className = 'irow'; d.dataset.s = s || ''; d.dataset.c = c ?? '';
+  d.innerHTML = `<select class="ai-s">${optSab().map(x => `<option value="${x[0]}" ${x[0] === s ? 'selected' : ''}>${x[1]}</option>`).join('')}</select><input class="ai-q" type="number" placeholder="Qtd" value="${q ?? ''}"><input class="ai-u" type="number" step="any" placeholder="R$ por un." value="${u ?? ''}"><button type="button" class="b sm red" onclick="this.parentNode.remove()">✕</button>`;
+  $('at-itens').appendChild(d);
+}
+function lerItens() {
+  return [...document.querySelectorAll('#at-itens .irow')].map(r => { const sabor = r.querySelector('.ai-s').value; return { sabor, qtd: num(r.querySelector('.ai-q').value), unitario: num(r.querySelector('.ai-u').value), custoUnd: r.dataset.c !== '' && r.dataset.s === sabor ? num(r.dataset.c) : custo(sabor, 'atacado') }; }).filter(i => i.qtd > 0 && i.unitario > 0);
+}
+function aplicarCustom() {
+  db.itensExtra.forEach(i => ITENS[i.id] = [i.nome, i.un]);
+  Object.entries(db.config.itensNome || {}).forEach(([k, n]) => { if (ITENS[k]) ITENS[k] = [n, ITENS[k][1]]; });
+  db.sabores.forEach(x => { const pk = x.prod || ('pudim_' + x.id); NS[x.id] = x.nome; SP[x.id] = pk; ITENS[pk] = ['Pudim ' + x.nome, 'un']; REC[x.id] = { rende: num(x.rende), prod: pk, ins: x.ins || {} }; });
+}
+function refreshSel() {
+  const fill = (el, o) => { if (!el || el.options.length === o.length) return; const v = el.value; el.innerHTML = o.map(x => `<option value="${x[0]}">${x[1]}</option>`).join(''); if ([...el.options].some(p => p.value === v)) el.value = v; };
+  ['pv-sab', 'pv-s1', 'pv-s2', 'pv-s3', 'f-producoes-sabor'].forEach(i => fill($(i), optSab()));
+  document.querySelectorAll('.ai-s').forEach(e => fill(e, optSab()));
+  fill($('pv-ev'), [['', 'Venda normal (varejo)'], ...db.eventos.filter(e => !e.encerrado).map(e => [e.id, '🎄 ' + e.nome])]);
+  fill($('f-eventos-itemEmb'), [['', '— nenhuma —'], ...optIt().filter(([k]) => !PRONTOS.includes(k))]);
+  fill($('f-estoqueMov-item'), optIt()); fill($('f-compras-item'), optComp());
+}
+function bnavSync() {
+  const v = visiveis().map(t => t[0]), a = document.querySelector('.tab.on'), id = a ? a.id.slice(4) : '';
+  document.querySelectorAll('#bnav button[data-t]').forEach(b => { b.hidden = !v.includes(b.dataset.t); b.classList.toggle('on', b.dataset.t === id); });
+}
+R.rateio = () => {
+  const tab = L => {
+    const T = { liq: 0, ins: 0, cg: 0, mo: 0, l: 0, fundo: 0, lu: 0, bea: 0 }, rows = L.map(([n, d, liq, ins]) => { const r = rateio(liq - ins); T.liq += liq; T.ins += ins; ['cg', 'mo', 'l', 'fundo', 'lu', 'bea'].forEach(k => T[k] += r[k]); return [n, fdata(d), R$(liq), `<span class="neg">-${R$(ins)}</span>`, `<span class="neg">-${R$(r.cg)}</span>`, `<span class="neg">-${R$(r.mo)}</span>`, `<b style="color:var(--ok)">${R$(r.l)}</b>`, R$(r.fundo), R$(r.lu), R$(r.bea)]; });
+    const tot = ['<b>TOTAL</b>', '', `<b>${R$(T.liq)}</b>`, `<b>-${R$(T.ins)}</b>`, `<b>-${R$(T.cg)}</b>`, `<b>-${R$(T.mo)}</b>`, `<b>${R$(T.l)}</b>`, `<b>${R$(T.fundo)}</b>`, `<b>${R$(T.lu)}</b>`, `<b>${R$(T.bea)}</b>`];
+    return tbl(['#', 'Data', 'Líquido', 'Insumo', 'Gerais (15%)', 'Mão de obra (23%)', 'Lucro', 'Fundo (12%)', 'Luyan (53%)', 'Beatriz (35%)'], L.length ? [tot, ...rows.slice(0, 80)] : [], 'Sem lançamentos.');
+  };
+  $('rt-v').innerHTML = tab(ordenar(db.vendas).map(v => ['#' + v.num, v.data, num(v.liquido), qtdTotal(v) * num(v.custoUnd)]));
+  $('rt-a').innerHTML = tab(ordenar(db.atacado.filter(a => a.status === 'PAGO')).map(a => ['#' + a.num, a.data, num(a.totalLiquido), insAt(a)]));
+};
+
+/* ============ FICHA TÉCNICA, SABORES, ITENS, EVENTOS ============ */
+const PU = k => k === 'ovos' ? 'pacote c/ 20' : (k === 'sacola' ? 'un' : ({ g: 'kg', ml: 'litro', un: 'un' }[ITENS[k][1]]));
+const costBase = (k, P = db.config.fichaPrecos) => num(P[k]) / (k === 'ovos' ? 20 : (ITENS[k] && ITENS[k][1] !== 'un' ? 1000 : 1));
+const fichaKeys = () => Object.keys(ITENS).filter(k => !PRONTOS.includes(k) && !k.startsWith('sacola_')).concat('sacola');
+function custosSabor(x, P) {
+  P = P || db.config.fichaPrecos; let rec = 0; for (const k in (x.ins || {})) rec += num(x.ins[k]) * costBase(k, P);
+  const at = (rec + num(x.rende) * (costBase('copo', P) + costBase('tampa', P) + costBase('adesivo', P))) / (num(x.rende) || 1);
+  return { at, va: at + costBase('sacola', P) + costBase('colher', P) };
+}
+function cfgFicha() {
+  const P = db.config.fichaPrecos;
+  return `<div class="card"><h3>Calculadora de ficha técnica</h3><p style="color:var(--mu)">Custo de cada sabor calculado pelos ingredientes da receita. Só muda os custos oficiais quando você aplicar. Itens e sabores novos aparecem aqui sozinhos.</p><div class="fg">${fichaKeys().map(k => `<div><label>${k === 'sacola' ? 'Sacola' : ITENS[k][0]} (R$ / ${PU(k)})</label><input id="fp-${k}" type="number" step="any" value="${num(P[k])}" oninput="calcFicha()"></div>`).join('')}</div><div id="fc-res"></div><div class="row"><button class="b pri" onclick="aplicarFicha()">Aplicar custos nas tabelas varejo/atacado</button></div></div>`;
+}
+function lerP() { const P = {}; fichaKeys().forEach(k => { const e = $('fp-' + k); P[k] = e ? num(e.value) : num(db.config.fichaPrecos[k]); }); return P; }
+function calcFicha() {
+  const el = $('fc-res'); if (!el) return; const P = lerP();
+  el.innerHTML = tbl(['Sabor', 'Atacado (un)', 'Varejo (un)', 'Cadastrado hoje (atac. / var.)'], db.sabores.map(x => { const c = custosSabor(x, P); return [NS[x.id] + (ativo(SP[x.id]) ? '' : ' <span class="tag wa">inativo</span>'), R$(c.at), '<b>' + R$(c.va) + '</b>', R$(custo(x.id, 'atacado')) + ' / ' + R$(custo(x.id, 'varejo'))]; }));
+}
+function aplicarFicha() {
+  const P = lerP(); db.config.fichaPrecos = P;
+  db.sabores.forEach(x => { const c = custosSabor(x, P); db.config.insumo.atacado[x.id] = r2(c.at); db.config.insumo.varejo[x.id] = r2(c.va); });
+  guardar(); rConfig(); toast('Custos aplicados.');
+}
+let sbEdit = null;
+function cfgSabores() {
+  const rows = db.sabores.map(x => { const a = ativo(SP[x.id]); return [`<b>${x.nome}</b>`, x.rende, R$(custo(x.id, 'atacado')), R$(custo(x.id, 'varejo')), x.adic ? '+' + R$(x.adic) : '-', Object.entries(x.ins || {}).map(([k, q]) => `${r2(q)} ${ITENS[k] ? ITENS[k][1] : ''} ${ITENS[k] ? ITENS[k][0] : k}`).join(', '), `<span class="tag ${a ? 'ok' : 'no'}">${a ? 'Ativo' : 'Inativo'}</span>`, bt('✏️ Editar', `editSabor('${x.id}')`) + bt(a ? 'Inativar' : 'Ativar', `toggleInativo('${SP[x.id]}')`)]; });
+  return `<div class="card"><h3>Sabores</h3>${tbl(['Sabor', 'Rende', 'Custo atac.', 'Custo var.', 'Adic. combo', 'Ingredientes por receita', 'Status', 'Ações'], rows)}
+  <h4 id="sb-tit">Novo sabor</h4><div class="fg"><div><label>Nome do sabor</label><input id="sb-nome"></div><div><label>Pudins por receita</label><input id="sb-rende" type="number"></div><div><label>Adicional no combo (R$)</label><input id="sb-adic" type="number" step="any"></div><div><label>Custo insumo atacado (R$/un) — vazio = calcular pela ficha</label><input id="sb-ca" type="number" step="any"></div><div><label>Custo insumo varejo (R$/un) — vazio = calcular pela ficha</label><input id="sb-cv" type="number" step="any"></div></div>
+  <label>Ingredientes por receita (copo, tampa e adesivo baixam sozinhos). Atenção: mudar a receita recalcula o estoque das produções já lançadas.</label><div id="sb-ing"></div><div class="row"><button class="b sm" onclick="addIng()">+ Ingrediente</button><button class="b pri" onclick="salvarSabor()">Salvar sabor</button><button class="b" onclick="sbEdit=null;sbForm()">Limpar / cancelar edição</button></div></div>`;
+}
+function sbForm() {
+  if (!$('sb-nome')) return; const x = sbEdit ? db.sabores.find(y => y.id === sbEdit) : null;
+  $('sb-tit').textContent = x ? 'Editando: ' + x.nome : 'Novo sabor';
+  $('sb-nome').value = x ? x.nome : ''; $('sb-rende').value = x ? x.rende : 7; $('sb-adic').value = x ? (x.adic || 0) : 0;
+  $('sb-ca').value = x ? custo(x.id, 'atacado') : ''; $('sb-cv').value = x ? custo(x.id, 'varejo') : '';
+  $('sb-ing').innerHTML = ''; const e = x ? Object.entries(x.ins || {}) : []; if (e.length) e.forEach(([k, q]) => addIng(k, q)); else addIng();
+}
+function editSabor(id) { sbEdit = id; sbForm(); $('sb-nome').scrollIntoView({ behavior: 'smooth' }); }
+function addIng(i, q) {
+  const el = $('sb-ing'); if (!el) return; const d = document.createElement('div'); d.className = 'irow';
+  d.innerHTML = `<select class="ig-i">${Object.keys(ITENS).filter(k => !PRONTOS.includes(k) && !EMB.includes(k)).map(k => `<option value="${k}" ${k === i ? 'selected' : ''}>${ITENS[k][0]} (${ITENS[k][1]})</option>`).join('')}</select><input class="ig-q" type="number" step="any" placeholder="Qtd por receita" value="${q ?? ''}"><button type="button" class="b sm red" onclick="this.parentNode.remove()">✕</button>`;
+  el.appendChild(d);
+}
+function salvarSabor() {
+  const nome = $('sb-nome').value.trim(), rende = num($('sb-rende').value);
+  const id = sbEdit || nome.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!nome || !id || !rende) return toast('Informe nome e pudins por receita.', 1);
+  if (!sbEdit && NS[id]) return toast('Já existe um sabor com esse nome.', 1);
+  const ins = {}; document.querySelectorAll('#sb-ing .irow').forEach(r => { const q = num(r.querySelector('.ig-q').value), k = r.querySelector('.ig-i').value; if (q > 0) ins[k] = (ins[k] || 0) + q; });
+  if (!Object.keys(ins).length) return toast('Adicione pelo menos um ingrediente.', 1);
+  let x = db.sabores.find(y => y.id === id); if (!x) { x = { id, prod: 'pudim_' + id }; db.sabores.push(x); }
+  Object.assign(x, { nome, rende, adic: num($('sb-adic').value), ins });
+  const c = custosSabor(x); db.config.insumo.atacado[id] = num($('sb-ca').value) || r2(c.at); db.config.insumo.varejo[id] = num($('sb-cv').value) || r2(c.va);
+  sbEdit = null; aplicarCustom(); guardar(); rConfig(); toast('Sabor salvo!');
+}
+function cfgItens() {
+  const rows = Object.keys(ITENS).filter(k => !PRONTOS.includes(k)).map(k => { const a = ativo(k); return [ITENS[k][0], ITENS[k][1], minOf(k), `<span class="tag ${a ? 'ok' : 'no'}">${a ? 'Ativo' : 'Inativo'}</span>`, bt('✏️ Editar', `editItem('${k}')`) + bt(a ? 'Inativar' : 'Ativar', `toggleInativo('${k}')`)]; });
+  return `<div class="card"><h3>Ingredientes e itens de estoque</h3>${tbl(['Item', 'Unid.', 'Estoque mínimo', 'Status', 'Ações'], rows)}<h4>Novo item</h4><div class="fg"><div><label>Nome</label><input id="ie-nome"></div><div><label>Unidade</label><select id="ie-un"><option value="g">gramas</option><option value="ml">ml</option><option value="un">unidades</option></select></div></div><div class="row"><button class="b pri" onclick="salvarItem()">Cadastrar item</button></div></div>`;
+}
+function editItem(k) { ask('Editar: ' + ITENS[k][0], [['n', 'Nome', 'text', ITENS[k][0]], ['m', `Estoque mínimo para alerta (${ITENS[k][1]})`, 'number', minOf(k)]], r => { if (r.n.trim()) db.config.itensNome[k] = r.n.trim(); db.config.minimos[k] = num(r.m); guardar(); rConfig(); toast('Item atualizado.'); }); }
+function toggleInativo(k) { if (db.config.inativos[k]) delete db.config.inativos[k]; else db.config.inativos[k] = true; guardar(); rConfig(); }
+function salvarItem() {
+  const nome = $('ie-nome').value.trim(); if (!nome) return toast('Informe o nome.', 1);
+  const id = 'x_' + uid(); db.itensExtra.push({ id, nome, un: $('ie-un').value }); db.config.fichaPrecos[id] = 0;
+  aplicarCustom(); guardar(); rConfig(); toast('Item cadastrado! Informe o preço na ficha técnica.');
+}
+function vendaEvento(id) { switchTab('vendas'); refreshSel(); $('pv-ev').value = id; pdvEv(); }
+function toggleEvento(id) { const e = db.eventos.find(x => x.id === id); e.encerrado = !e.encerrado; guardar(); }
+R.eventos = () => {
+  rLista('eventos'); const L = linhasFin().filter(x => x.canal === 'evento');
+  $('ev-rel').innerHTML = tbl(['Evento', 'Unidades', 'Fat. bruto', 'Fat. líquido', 'Insumo + embalagem', 'Lucro líquido'], db.eventos.map(e => { const l = L.filter(x => x.ev === e.id), t = k => l.reduce((a, x) => a + x[k], 0); return [`<b>${e.nome}</b>`, t('q'), R$(t('bruto')), R$(t('liq')), R$(t('ins')), `<b style="color:var(--ok)">${R$(t('l'))}</b>`]; }), 'Nenhum evento ainda.');
+};
 
 /* ============ NAVEGAÇÃO / INICIALIZAÇÃO ============ */
 const visiveis = () => TABS.filter(t => role === 'admin' || (t[0] !== 'config' && db.config.abasViewer[t[0]]));
@@ -444,6 +584,7 @@ function switchTab(id) {
   $('side').classList.remove('open'); if (id === 'config') rConfig(); localStorage.setItem('pudimTab', id); updateAll();
 }
 function updateAll() {
+  aplicarCustom(); refreshSel(); bnavSync();
   if (!$('bdg')) buildNav(); else if (visiveis().length !== $('nav').children.length) { buildNav(); }
   const ativa = document.querySelector('.tab.on'); if (!ativa) return;
   const id = ativa.id.slice(4); if (id !== 'config') R[id](); if (id !== 'dashboard') { try { rDash(); } catch (e) { } }
@@ -457,7 +598,7 @@ function sair() { firebase.auth().signOut(); }
 function iniciar() {
   firebase.initializeApp(firebaseConfig);
   $('tabs').innerHTML = TABS.map(t => `<section class="tab" id="tab-${t[0]}">${H[t[0]]()}</section>`).join('');
-  Object.keys(SCH).forEach(l => { const f = $('form-' + l); if (f) f.innerHTML = formHTML(l); });
+  Object.keys(SCH).forEach(l => { const f = $('form-' + l); if (f) renderForm(l); });
   try { const s = localStorage.getItem(LS); if (s) db = carregar(JSON.parse(s)); } catch (e) { }
   pdvTog(); pdvCart();
   firebase.auth().onAuthStateChanged(u => {
