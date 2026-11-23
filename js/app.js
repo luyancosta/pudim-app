@@ -35,14 +35,16 @@ const inp = (id, t, v = '', o = []) => t === 'select'
   : `<input id="${id}" type="${t}" step="any" value="${v}">`;
 const tbl = (h, r, vz = 'Nada por aqui ainda.') => `<div class="tw"><table><thead><tr>${h.map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${r.length ? r.map(x => `<tr>${x.map((c, i) => `<td data-label="${h[i] || ''}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td class="vz" colspan="${h.length}">${vz}</td></tr>`}</tbody></table></div>`;
 const kpi = (t, v, cl = '') => `<div class="k ${cl}"><small>${t}</small><b>${v}</b></div>`;
-function toast(m, err) { const t = $('toast'); t.textContent = m; t.className = 'on' + (err ? ' err' : ''); clearTimeout(t._t); t._t = setTimeout(() => t.className = '', 3200); }
+let _trava = 0;
+function toast(m, err) { if (!err && Date.now() < _trava) return; const t = $('toast'); t.textContent = m; t.className = 'on' + (err ? ' err' : ''); clearTimeout(t._t); t._t = setTimeout(() => t.className = '', err ? 6500 : (m.length > 60 ? 5500 : 3200)); }
+const falha = m => { _trava = Date.now() + 2500; toast(m, 1); return false; };
 function ask(titulo, campos, cb) {
   $('m-t').textContent = titulo;
   $('m-b').innerHTML = campos.map(c => `<label>${c[1]}</label>${inp('m-' + c[0], c[2], c[3], c[4])}`).join('');
-  $('m-ok').hidden = false; $('modal').hidden = false;
+  $('m-ok').hidden = false; $('m-x').textContent = 'Cancelar'; $('modal').hidden = false;
   $('m-ok').onclick = () => { const v = {}; campos.forEach(c => v[c[0]] = $('m-' + c[0]).value); fechar(); cb(v); };
 }
-function info(t, h) { $('m-t').textContent = t; $('m-b').innerHTML = h; $('m-ok').hidden = true; $('modal').hidden = false; }
+function info(t, h) { $('m-t').textContent = t; $('m-b').innerHTML = h; $('m-ok').hidden = true; $('m-x').textContent = 'Fechar'; $('modal').hidden = false; }
 function fechar() { $('modal').hidden = true; }
 
 /* ============ DADOS ============ */
@@ -106,18 +108,20 @@ function versoes() {
     if (ultimoJSON && (!v.length || Date.now() - v[0].ts > 600000)) { v.unshift({ ts: Date.now(), json: ultimoJSON }); localStorage.setItem(LSV, JSON.stringify(v.slice(0, 5))); }
   } catch (e) { }
 }
+function recarregaLocal() { if (ultimoJSON) { try { db = carregar(JSON.parse(ultimoJSON)); } catch (e) { } } updateAll(); }
 function guardar(forcar) {
-  if (role !== 'admin') return toast('Modo visualização: só o administrador altera.', 1);
-  if (!carregou) return toast('Aguarde a sincronização com a nuvem.', 1);
+  if (role !== 'admin') { recarregaLocal(); return falha('Modo visualização: só o administrador altera.'); }
+  if (!carregou) { recarregaLocal(); return falha('Ainda sincronizando com a nuvem. NADA foi salvo, tente de novo em instantes.'); }
   const t = total(db);
-  if (!forcar && ultimoTotal > 10 && t < ultimoTotal * 0.5) { db = carregar(JSON.parse(ultimoJSON)); updateAll(); return toast('Gravação bloqueada: os dados ficaram muito menores. Nada foi alterado.', 1); }
+  if (!forcar && ultimoTotal > 10 && t < ultimoTotal * 0.5) { db = carregar(JSON.parse(ultimoJSON)); updateAll(); return falha('Gravação bloqueada: os dados ficaram muito menores. Nada foi alterado.'); }
   versoes();
   // UMA única gravação com tudo que mudou (várias gravações seguidas faziam a nuvem devolver dados antigos e apagar o resto)
   const up = {}; KEYS.concat('config').forEach(k => { const j = JSON.stringify(db[k]); if (j !== ultimoSync[k]) { const v = JSON.parse(j); up[k] = Array.isArray(v) && !v.length ? null : v; } });
   ultimoTotal = t; ultimoJSON = JSON.stringify(db);
   try { localStorage.setItem(LS, ultimoJSON); } catch (e) { }
-  if (Object.keys(up).length) firebase.database().ref('pudimAppDB').update(up).then(() => $('sync').classList.remove('off')).catch(e => { $('sync').classList.add('off'); toast('Erro ao salvar na nuvem: ' + e.code, 1); });
-  updateAll();
+  const erroNuvem = e => { $('sync').classList.add('off'); toast('NÃO SALVOU na nuvem (' + (e.code || e.message) + '). Confira a internet e as regras do Firebase.', 1); };
+  if (Object.keys(up).length) { try { firebase.database().ref('pudimAppDB').update(up).then(() => $('sync').classList.remove('off')).catch(erroNuvem); } catch (e) { erroNuvem(e); } }
+  updateAll(); return true;
 }
 
 /* ============ CÁLCULOS ============ */
@@ -144,13 +148,18 @@ function saldos() {
   db.atacado.forEach(a => { atItens(a).forEach(i => s[SP[i.sabor] || 'pudim'] -= num(i.qtd)); s.copo += num(a.copos); });
   return s;
 }
+const CATS = ['INSUMOS', 'EMBALAGEM', 'GASTOS GERAIS', 'MARKETING', 'ENTREGADOR'];
+const CXD = { INSUMOS: ['Insumos', 'Insumo fixo'], EMBALAGEM: ['Insumos', 'Insumo fixo'], 'GASTOS GERAIS': ['CG', 'Custos gerais'], MARKETING: ['Fundo', 'Fundo empresa'], ENTREGADOR: ['Entrega', 'Gaveta entregas'] };
+// categoria desconhecida/antiga conta como Gastos gerais (antes era ignorada e não descontava de nada)
+const catDesp = d => { const k = String(d.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toUpperCase(); return CATS.includes(k) ? k : 'GASTOS GERAIS'; };
+const dtot = d => num(d.total) || r2((num(d.qtd) || 1) * num(d.unitario));
 function caixas() {
   const L = linhasFin(), sm = k => L.reduce((a, x) => a + x[k], 0);
-  const dsp = c => db.despesas.filter(d => d.categoria === c).reduce((a, d) => a + num(d.total), 0);
+  const dsp = c => db.despesas.filter(d => catDesp(d) === c).reduce((a, d) => a + dtot(d), 0);
   const aj = c => db.ajustes.filter(a => a.caixa === c).reduce((a, x) => a + num(x.valor), 0);
   const sq = t => db.pagamentos.filter(p => p.tipo === t).reduce((a, p) => a + num(p.valor), 0);
   const ev = []; db.vendas.forEach(v => { if (num(v.entrega) > 0) ev.push({ d: v.data || '', id: v.id, t: 'e', v: num(v.entrega) }); });
-  db.despesas.filter(d => d.categoria === 'ENTREGADOR').forEach(d => ev.push({ d: d.data || '', id: d.id, t: 's', v: num(d.total) }));
+  db.despesas.filter(d => catDesp(d) === 'ENTREGADOR').forEach(d => ev.push({ d: d.data || '', id: d.id, t: 's', v: dtot(d) }));
   ev.sort((a, b) => a.d === b.d ? a.id - b.id : (a.d < b.d ? -1 : 1));
   let gav = 0, desc = 0; ev.forEach(e => { if (e.t === 'e') gav += e.v; else if (gav >= e.v) gav -= e.v; else { desc += e.v - gav; gav = 0; } });
   const c = { Insumos: sm('ins') - dsp('INSUMOS') - dsp('EMBALAGEM') + aj('Insumos'), CG: sm('cg') - dsp('GASTOS GERAIS') - desc + aj('CG'), MO: sm('mo') - sq('MaoObra') + aj('MO'), Fundo: sm('fundo') - dsp('MARKETING') + aj('Fundo'), Luyan: sm('lu') - sq('Luyan') + aj('Luyan'), Beatriz: sm('bea') - sq('Beatriz') + aj('Beatriz'), Entrega: gav + aj('Entrega') };
@@ -198,10 +207,11 @@ const SCH = {
   despesas: {
     t: 'Despesa', f: [['data', 'Data', 'date'], ['item', 'Descrição', 'text'], ['qtd', 'Qtd', 'number'], ['unitario', 'Valor unitário (R$)', 'number'], ['categoria', 'Categoria', 'select', [['INSUMOS', 'Insumos'], ['EMBALAGEM', 'Embalagem'], ['GASTOS GERAIS', 'Gastos gerais'], ['MARKETING', 'Marketing'], ['ENTREGADOR', 'Entregador']]]],
     h: ['#', 'Data', 'Item', 'Total', 'Categoria'], r: d => ['#' + d.num, fdata(d.data), d.item, R$(d.total), d.categoria],
-    pre: o => { o.qtd = num(o.qtd) || 1; o.unitario = num(o.unitario); o.total = r2(o.qtd * o.unitario); if (!o.total) { toast('Informe o valor.', 1); return false; } }
+    pre: o => { o.qtd = num(o.qtd) || 1; o.unitario = num(o.unitario); o.total = r2(o.qtd * o.unitario); if (!o.total) { toast('Informe o valor.', 1); return false; } },
+    msg: n => { const [k, nome] = CXD[catDesp(n)], c = caixas(); return `Despesa de ${R$(n.total)} descontada de ${nome} (saldo ${R$(c[k])}). Total em conta: ${R$(c.total)}`; }
   },
   pagamentos: { t: 'Saque', f: [['data', 'Data', 'date'], ['tipo', 'Caixinha', 'select', [['MaoObra', 'Mão de obra'], ['Luyan', 'Luyan'], ['Beatriz', 'Beatriz']]], ['valor', 'Valor (R$)', 'number'], ['obs', 'Observação', 'text']], h: ['Data', 'Caixinha', 'Valor', 'Obs.'], r: p => [fdata(p.data), p.tipo, '-' + R$(p.valor), p.obs || '-'], pre: o => { o.valor = num(o.valor); if (!o.valor) { toast('Informe o valor.', 1); return false; } } },
-  producoes: { t: 'Produção (bater receita)', f: [['data', 'Data', 'date'], ['sabor', 'Sabor', 'select', optSab], ['qtd', 'Nº de receitas', 'number', null, 1]], h: ['Data', 'Sabor', 'Receitas', 'Pudins'], r: p => [fdata(p.data), NS[p.sabor], p.qtd, p.qtd * REC[p.sabor].rende], pre: o => { o.qtd = num(o.qtd); if (!o.qtd) { toast('Informe a quantidade.', 1); return false; } } },
+  producoes: { t: 'Produção (bater receita)', f: [['data', 'Data', 'date'], ['sabor', 'Sabor', 'select', optSab], ['qtd', 'Nº de receitas', 'number', null, 1]], h: ['Data', 'Sabor', 'Receitas', 'Pudins'], r: p => [fdata(p.data), NS[p.sabor] || p.sabor, p.qtd, p.qtd * ((REC[p.sabor] || {}).rende || 0)], pre: o => { o.qtd = num(o.qtd); if (!o.qtd) { toast('Informe a quantidade.', 1); return false; } } },
   estoqueMov: {
     t: 'Ajuste manual / perda', f: [['data', 'Data', 'date'], ['item', 'Item', 'select', optIt], ['tipo', 'Tipo', 'select', [['entrada', 'Entrada (+)'], ['saida', 'Saída (−)'], ['perda', 'Perda / quebra']]], ['qtd', 'Quantidade', 'number'], ['desc', 'Motivo', 'text']],
     h: ['Data', 'Item', 'Mov.', 'Motivo'], r: m => [fdata(m.data), ITENS[m.item] ? ITENS[m.item][0] : m.item, `<b class="${m.tipo === 'entrada' ? '' : 'neg'}">${m.tipo === 'entrada' ? '+' : '−'}${r2(m.qtd)}</b>`, m.desc || '-'],
@@ -209,7 +219,7 @@ const SCH = {
   },
   compras: {
     t: 'Compra direta (atualiza estoque e despesas)', semEdit: 1, f: [['data', 'Data', 'date'], ['fornecedor', 'Fornecedor (opcional)', 'text'], ['item', 'Item', 'select', optComp], ['qtd', 'Quantidade', 'number'], ['unidade', 'Unidade', 'select', [['un', 'Unidade(s)'], ['kg', 'Quilo(s)'], ['g', 'Grama(s)'], ['l', 'Litro(s)'], ['ml', 'ml'], ['pct20', 'Pacote c/ 20 un']]], ['valor', 'Valor total pago (R$)', 'number']],
-    h: ['Data', 'Item', 'Comprado', 'Entrou no estoque', 'Total', 'Fornecedor'], r: c => [fdata(c.data), ITENS[c.item][0], `${c.qtd} ${c.unidade}`, `${r2(c.qtdBase)} ${ITENS[c.item][1]}`, R$(c.valor), c.fornecedor || '-'],
+    h: ['Data', 'Item', 'Comprado', 'Entrou no estoque', 'Total', 'Fornecedor'], r: c => [fdata(c.data), IT(c.item)[0], `${c.qtd} ${c.unidade}`, `${r2(c.qtdBase)} ${IT(c.item)[1]}`, R$(c.valor), c.fornecedor || '-'],
     pre: o => {
       const it = ITENS[o.item]; o.qtd = num(o.qtd); o.valor = num(o.valor);
       if (!UNOK[it[1]].includes(o.unidade)) { toast(`Para ${it[0]} use: ${UNOK[it[1]].join(' ou ')}.`, 1); return false; }
@@ -223,7 +233,8 @@ const SCH = {
     }
   }
 };
-const formHTML = l => { const s = SCH[l]; return `<div class="card"><h3>${edit[l] ? '✏️ Editando: ' : ''}${s.t}</h3><div class="fg">${s.f.map(([k, lb, t, o, d]) => `<div><label>${lb}</label>${inp(`f-${l}-${k}`, t, d !== undefined ? d : (t === 'date' ? hoje() : ''), typeof o === 'function' ? o() : o)}</div>`).join('')}</div>${s.extra ? s.extra() : ''}<div class="row"><button class="b pri" onclick="salvar('${l}')">Salvar</button>${edit[l] ? `<button class="b" onclick="limpar('${l}')">Cancelar edição</button>` : ''}</div></div>`; };
+const mobile = () => window.matchMedia && matchMedia('(max-width:900px)').matches;
+const formHTML = l => { const s = SCH[l]; return `<details class="fd" ${edit[l] || !mobile() ? 'open' : ''}><summary>${edit[l] ? '✏️ Editando: ' : '➕ '}${s.t}</summary><div class="fg">${s.f.map(([k, lb, t, o, d]) => `<div><label>${lb}</label>${inp(`f-${l}-${k}`, t, d !== undefined ? d : (t === 'date' ? hoje() : ''), typeof o === 'function' ? o() : o)}</div>`).join('')}</div>${s.extra ? s.extra() : ''}<div class="row"><button class="b pri" onclick="salvar('${l}')">Salvar</button>${edit[l] ? `<button class="b" onclick="limpar('${l}')">Cancelar edição</button>` : ''}</div></details>`; };
 function renderForm(l) { $('form-' + l).innerHTML = formHTML(l); if (l === 'atacado' && !edit.atacado) addItem(); }
 function limpar(l) { edit[l] = null; renderForm(l); }
 function salvar(l) {
@@ -235,7 +246,7 @@ function salvar(l) {
   if (s.pre && s.pre(n) === false) return;
   if (ant) Object.assign(ant, n); else db[l].push(n);
   if (s.pos) s.pos(n, !ant);
-  edit[l] = null; renderForm(l); guardar(); toast('Salvo!');
+  const msg = s.msg ? s.msg(n) : 'Salvo!'; edit[l] = null; renderForm(l); if (guardar()) toast(msg);
 }
 function editar(l, id) {
   const x = db[l].find(i => i.id === id); if (!x) return; edit[l] = id; renderForm(l); if (l === 'atacado') atItens(x).forEach(i => addItem(i.sabor, i.qtd, i.unitario, i.custoUnd));
@@ -273,8 +284,8 @@ const H = {
     <div><label>Taxa de entrega (R$)</label><input id="pv-ent" type="number" step="any" value="0" oninput="pdvTot()"></div>
     <div><label>Sacola</label><select id="pv-sac"><option value="nenhuma">Nenhuma</option><option value="sacola_1">Sacola (1 un)</option><option value="sacola_2">Sacola (2 un)</option></select></div>
     <div><label>Qtd de sacolas</label><input id="pv-sacq" type="number" value="1" min="0"></div></div>
-    <div class="alert row" style="justify-content:space-between"><b>Total a cobrar</b><b id="pv-total" style="font-size:1.5rem">R$ 0,00</b></div>
-    <button class="b pri" onclick="pdvFinal()">Finalizar venda</button></div>
+    <div class="paybar"><div class="alert row" style="justify-content:space-between"><b>Total a cobrar</b><b id="pv-total" style="font-size:1.5rem">R$ 0,00</b></div>
+    <button class="b pri" onclick="pdvFinal()">Finalizar venda</button></div></div>
     <h4>Histórico de vendas</h4><div id="lista-vendas"></div>`,
   atacado: () => lista('atacado'), clientes: () => `<div class="alert" id="rc-aviso" hidden></div>${lista('clientes').replace('<div id="lista-clientes"></div>', '')}<div id="clientes-tab"></div>`,
   receber: () => `<div class="grid" id="rec-k"></div><div id="rec-t"></div>`,
@@ -288,27 +299,48 @@ const H = {
 
 /* ============ RENDER ============ */
 const R = {};
+const IT = k => ITENS[k] || [k, '']; 
 const KB = (t, v, c) => kpi(t, R$(v), v < -0.004 ? 'neg ' + (c || '') : c || '');
 R.dashboard = () => rDash();
+const dashOpen = {};
+const dtog = k => `ontoggle="dashOpen['${k}']=this.open" ${dashOpen[k] ? 'open' : ''}`;
 function rDash() {
+  try { rDash0(); } catch (e) { console.error('Painel:', e); const b = $('dash-body'); if (b) b.innerHTML = `<div class="alert"><b>Não consegui montar o painel.</b><br>Erro: ${String((e && e.message) || e)}</div>`; }
+}
+function rDash0() {
   const c = caixas(), m = $('dash-mes') ? $('dash-mes').value : '', L = linhasFin().filter(x => !m || x.data.startsWith(m));
   const rc = recompra().filter(x => x.alerta), pend = db.atacado.filter(atrasado), sal = saldos(), baixos = Object.keys(ITENS).filter(k => ativo(k) && sal[k] <= minOf(k));
+  const dsp = db.despesas.filter(d => !m || (d.data || '').startsWith(m)).reduce((a, d) => a + dtot(d), 0);
   $('aviso-setup').innerHTML = db.config.setupFeito || role !== 'admin' || db.ajustes.length ? '' : `<div class="alert">Sistema novo: confira e aplique o <b>saldo inicial</b> em Configurações. <button class="b sm" onclick="irPara('config')">Abrir</button></div>`;
-  const cx = (t, k, ex) => `<div class="k c-${k} ${c[k] < -0.004 ? 'neg' : ''}"><small>${t}</small><b>${R$(c[k])}</b><div class="row">${ex || ''}${bt('⚖️ Ajustar', `ajustar('${k}')`)}</div></div>`;
-  const grp = can => { const l = L.filter(x => x.canal === can), s = k => l.reduce((a, x) => a + x[k], 0); return `<div class="grid">${kpi('Fat. bruto', R$(s('bruto')))}${kpi('Fat. líquido', R$(s('liq')))}${kpi('Qtd vendida', s('q'))}${KB('Insumo fixo', s('ins'))}${KB('Custos gerais', s('cg'))}${KB('Mão de obra', s('mo'))}${KB('Lucro líquido', s('l'), 'ok')}${kpi('Fundo empresa', R$(s('fundo')))}${kpi('Luyan', R$(s('lu')))}${kpi('Beatriz', R$(s('bea')))}</div>`; };
+  const cx = (t, k, ex) => `<div class="k c-${k} ${c[k] < -0.004 ? 'neg' : ''}"><small>${t}</small><b>${R$(c[k])}</b><div class="row">${ex || ''}<button class="b sm adm" title="Ajustar saldo" onclick="ajustar('${k}')">⚖️</button></div></div>`;
+  const sec = (key, tit, can) => { const l = L.filter(x => x.canal === can), s = k => l.reduce((a, x) => a + x[k], 0); return `<details class="sec" ${dtog(key)}><summary><span>${tit}</span><b class="${s('l') < -0.004 ? 'neg' : ''}">${R$(s('l'))}<small> lucro</small></b></summary><div class="grid">${kpi('Fat. bruto', R$(s('bruto')))}${kpi('Fat. líquido', R$(s('liq')))}${kpi('Qtd vendida', s('q'))}${KB('Insumo fixo', s('ins'))}${KB('Custos gerais', s('cg'))}${KB('Mão de obra', s('mo'))}${KB('Lucro líquido', s('l'), 'ok')}${kpi('Fundo empresa', R$(s('fundo')))}${kpi('Luyan', R$(s('lu')))}${kpi('Beatriz', R$(s('bea')))}</div></details>`; };
+  const chip = (ic, n, lb, k) => n ? `<button class="chip ${k}" onclick="avisos('${k}')"><span>${ic}</span>${lb}<i>${n}</i></button>` : '';
+  const chips = chip('📞', rc.length, 'Contatar', 'rc') + chip('⏳', pend.length, 'Vencidos', 'pend') + chip('📦', baixos.length, 'Estoque baixo', 'est');
   $('dash-body').innerHTML = `
-  ${rc.length ? `<div class="alert"><b>📞 Clientes para contatar (${rc.length})</b>${tbl(['Cliente', 'Último pedido', 'Dias', 'Ações'], rc.map(x => [x.c.nome, fdata(x.ult), `${x.dias} (aviso em ${x.lim})`, `<a class="b sm" target="_blank" href="${wpp(x.c)}">WhatsApp</a>` + bt('✔ Contatado hoje', `contatado(${x.c.id})`)]))}</div>` : ''}
-  ${pend.length ? `<div class="alert"><b>⚠️ ${pend.length} pedido(s) de atacado vencido(s)</b> — veja em "A receber".</div>` : ''}
-  ${baixos.length ? `<div class="alert"><b>📦 Estoque baixo:</b> ${baixos.map(k => ITENS[k][0]).join(', ')}</div>` : ''}
-  <div class="grid"><div class="k big"><small>Dinheiro total disponível em conta</small><b>${R$(c.total)}</b><div class="row">${bt('⚖️ Ajustar caixa geral', `ajustar('Caixa Geral')`)}</div></div></div>
+  ${chips ? `<div class="chips">${chips}</div>` : ''}
+  <div class="grid"><div class="k big ${c.total < -0.004 ? 'neg' : ''}"><small>Dinheiro total disponível em conta</small><b>${R$(c.total)}</b><div class="row"><span class="hsub">Despesas ${m ? 'do mês' : 'lançadas'}: ${R$(dsp)}</span><button class="b sm adm" onclick="ajustar('Caixa Geral')">⚖️ Ajustar</button></div></div></div>
   <h4>Caixinhas</h4><div class="grid">${cx('Insumo fixo', 'Insumos')}${cx('Custos gerais', 'CG')}${cx('Mão de obra', 'MO', bt('Sacar', `sacar('MaoObra')`, 'red'))}${cx('Fundo empresa', 'Fundo')}${cx('Luyan', 'Luyan', bt('Sacar', `sacar('Luyan')`, 'red'))}${cx('Beatriz', 'Beatriz', bt('Sacar', `sacar('Beatriz')`, 'red'))}${cx('Gaveta entregas', 'Entrega')}</div>
-  <h4>Varejo ${m ? '(' + m + ')' : '(tudo)'}</h4>${grp('varejo')}<h4>Atacado pago</h4>${grp('atacado')}${L.some(x => x.canal === 'evento') ? '<h4>Eventos</h4>' + grp('evento') : ''}`;
-  const n = rc.length + pend.length; $('bdg').innerHTML = n ? `<span class="bdg">${n}</span>` : '';
+  <h4>Resultados ${m ? '(' + m + ')' : ''}</h4>${sec('v', 'Varejo', 'varejo')}${sec('a', 'Atacado pago', 'atacado')}${L.some(x => x.canal === 'evento') ? sec('e', 'Eventos', 'evento') : ''}`;
+  const n = rc.length + pend.length; if ($('bdg')) $('bdg').innerHTML = n ? `<span class="bdg">${n}</span>` : '';
+}
+function avisos(t) {
+  let tit, h; const ir = (id, txt) => `<div class="row"><button class="b" onclick="fechar();irPara('${id}')">${txt}</button></div>`;
+  if (t === 'rc') {
+    const rc = recompra().filter(x => x.alerta); tit = '📞 Clientes para contatar';
+    h = (rc.length ? rc.map(x => `<div class="ai"><div><b>${x.c.nome}</b><small>Último pedido em ${fdata(x.ult)}, há ${x.dias} dias (aviso em ${x.lim})</small></div><div class="row"><a class="b sm" target="_blank" href="${wpp(x.c)}">WhatsApp</a><button class="b sm adm" onclick="contatado(${x.c.id})">✔ Contatado</button></div></div>`).join('') : '<p class="vz">Ninguém para contatar agora. 🎉</p>') + ir('clientes', 'Abrir clientes');
+  } else if (t === 'pend') {
+    const p = db.atacado.filter(atrasado); tit = '⏳ Pedidos vencidos';
+    h = (p.length ? p.map(a => `<div class="ai"><div><b>${a.cliente}</b><small>Pedido #${a.num}, ${R$(a.totalLiquido)}, venceu há ${difDias(a.venc, hoje())} dias</small></div><div class="row"><button class="b sm ok adm" onclick="receber(${a.id})">💰 Receber</button></div></div>`).join('') : '<p class="vz">Nenhum pedido vencido. 🎉</p>') + ir('receber', 'Abrir A receber');
+  } else {
+    const sal = saldos(), bx = Object.keys(ITENS).filter(k => ativo(k) && sal[k] <= minOf(k)); tit = '📦 Estoque baixo';
+    h = (bx.length ? bx.map(k => `<div class="ai"><div><b>${ITENS[k][0]}</b><small>Restam ${r2(sal[k])} ${ITENS[k][1]} (mínimo ${minOf(k)})</small></div></div>`).join('') : '<p class="vz">Estoque em dia. ✅</p>') + ir('estoque', 'Abrir estoque');
+  }
+  info(tit, h);
 }
 R.contagem = () => {
   const M = {}; const g = m => M[m] ||= { t: 0, n: 0, b: 0, x: 0, q: 0, br: 0, lq: 0, l: 0, d: 0 };
   linhasFin().forEach(x => { const o = g(x.data.slice(0, 7) || 'Sem data'); x.sab.forEach(([s, q]) => { if (s === 'ninho') o.n += q; else if (s === 'brigadeirao') o.b += q; else if (s === 'tradicional') o.t += q; else o.x += q; }); o.q += x.q; o.br += x.bruto; o.lq += x.liq; o.l += x.l; });
-  db.despesas.forEach(d => { g(d.data.slice(0, 7) || 'Sem data').d += num(d.total); });
+  db.despesas.forEach(d => { g((d.data || '').slice(0, 7) || 'Sem data').d += dtot(d); });
   const mn = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
   $('cont-body').innerHTML = `<div class="card">Atacado conta no <b>mês do pedido</b>, mas só aparece aqui depois de marcado como <b>pago</b>.</div>` + tbl(['Mês', 'Tradicional', 'Ninho', 'Brigadeirão', 'Outros sabores', 'Total vendido', 'Fat. bruto', 'Fat. líquido', 'Lucro líquido', 'Despesas'], Object.keys(M).sort().reverse().map(k => { const o = M[k], [y, mm] = k.split('-'); return [mm ? `<b>${mn[mm - 1]}/${y}</b>` : k, o.t, o.n, o.b, o.x, `<b>${o.q} un</b>`, R$(o.br), R$(o.lq), `<b style="color:var(--ok)">${R$(o.l)}</b>`, `<span class="neg">${R$(o.d)}</span>`]; }));
 };
@@ -332,7 +364,7 @@ R.receber = () => {
 R.compras = () => rLista('compras');
 R.precos = () => {
   const h = [...db.compras].sort((a, b) => a.data < b.data ? -1 : a.data > b.data ? 1 : a.id - b.id), por = {}, hist = [];
-  h.forEach(c => { const l = por[c.item] ||= [], p = l[l.length - 1], v = p ? (c.precoRef - p) / p * 100 : null; l.push(c.precoRef); hist.push([fdata(c.data), ITENS[c.item][0], c.fornecedor || '-', R$(c.precoRef) + '/' + (ITENS[c.item][1] === 'g' ? 'kg' : ITENS[c.item][1] === 'ml' ? 'L' : 'un'), v === null ? '-' : `<b class="${v > 0 ? 'neg' : ''}" style="${v < 0 ? 'color:var(--ok)' : ''}">${v > 0 ? '▲' : v < 0 ? '▼' : '='} ${Math.abs(v).toFixed(1).replace('.', ',')}%</b>`]); });
+  h.forEach(c => { const l = por[c.item] ||= [], p = l[l.length - 1], v = p ? (c.precoRef - p) / p * 100 : null; l.push(c.precoRef); hist.push([fdata(c.data), IT(c.item)[0], c.fornecedor || '-', R$(c.precoRef) + '/' + (IT(c.item)[1] === 'g' ? 'kg' : IT(c.item)[1] === 'ml' ? 'L' : 'un'), v === null ? '-' : `<b class="${v > 0 ? 'neg' : ''}" style="${v < 0 ? 'color:var(--ok)' : ''}">${v > 0 ? '▲' : v < 0 ? '▼' : '='} ${Math.abs(v).toFixed(1).replace('.', ',')}%</b>`]); });
   const res = Object.entries(por).map(([k, l]) => { const a = l[l.length - 1], p = l[l.length - 2], v = p ? (a - p) / p * 100 : null; return [ITENS[k][0], R$(a), p ? R$(p) : '-', v === null ? '-' : `${v > 0 ? '▲' : '▼'} ${Math.abs(v).toFixed(1).replace('.', ',')}%`, R$(Math.min(...l)), R$(Math.max(...l)), l.length]; });
   $('precos-body').innerHTML = `<div class="card">Apenas acompanhamento. <b>Não altera</b> a Calculadora de Ficha Técnica.</div><h4>Resumo por item (preço por kg, litro ou unidade)</h4>${tbl(['Item', 'Atual', 'Anterior', 'Variação', 'Mínimo', 'Máximo', 'Compras'], res, 'Registre compras para ver a evolução.')}<h4>Todas as compras</h4>${tbl(['Data', 'Item', 'Fornecedor', 'Preço', 'Variação vs. compra anterior'], hist.reverse())}`;
 };
@@ -355,10 +387,10 @@ R.config = () => { }; // montada em rConfig() ao abrir a aba
 function ajustar(k) { ask('Ajustar: ' + k, [['d', 'Data', 'date', hoje()], ['op', 'Operação', 'select', 'e', [['e', '➕ Adicionar'], ['s', '➖ Subtrair']]], ['v', 'Valor (R$)', 'number']], r => { let v = num(r.v); if (!v) return toast('Valor inválido.', 1); db.ajustes.push({ id: uid(), caixa: k, data: r.d, valor: r.op === 's' ? -v : v }); guardar(); toast('Ajustado.'); }); }
 function sacar(t) { ask('Saque — ' + t, [['d', 'Data', 'date', hoje()], ['v', 'Valor (R$)', 'number'], ['o', 'Observação', 'text']], r => { if (!num(r.v)) return toast('Valor inválido.', 1); db.pagamentos.push({ id: uid(), data: r.d, tipo: t, valor: num(r.v), obs: r.o }); guardar(); toast('Saque registrado.'); }); }
 function contar(k) { const at = r2(saldos()[k]); ask('Contagem real: ' + ITENS[k][0], [['q', `Quantidade real agora (sistema: ${at} ${ITENS[k][1]})`, 'number', at]], r => { const d = r2(num(r.q) - at); if (!d) return; db.estoqueMov.push({ id: uid(), data: hoje(), tipo: d > 0 ? 'entrada' : 'saida', item: k, qtd: Math.abs(d), desc: 'Contagem real' }); guardar(); toast('Estoque ajustado.'); }); }
-function receber(id) { const a = db.atacado.find(x => x.id === id); if (a && confirm(`Confirmar recebimento de ${R$(a.totalLiquido)} de ${a.cliente}?`)) { a.status = 'PAGO'; a.pagoEm = hoje(); guardar(); toast('Pagamento confirmado!'); } }
-function contatado(id) { const c = db.clientes.find(x => x.id === id); c.contatadoEm = hoje(); guardar(); }
+function receber(id) { const a = db.atacado.find(x => x.id === id); if (a && confirm(`Confirmar recebimento de ${R$(a.totalLiquido)} de ${a.cliente}?`)) { a.status = 'PAGO'; a.pagoEm = hoje(); guardar(); toast('Pagamento confirmado!'); if (!$('modal').hidden) avisos('pend'); } }
+function contatado(id) { const c = db.clientes.find(x => x.id === id); c.contatadoEm = hoje(); guardar(); if (!$('modal').hidden) avisos('rc'); }
 function toggleAtivo(id) { const c = db.clientes.find(x => x.id === id); c.ativo = c.ativo === 'nao' ? 'sim' : 'nao'; guardar(); }
-function histCliente(id) { const c = db.clientes.find(x => x.id === id); info('Histórico — ' + c.nome, tbl(['Data', 'Sabor', 'Qtd', 'Valor', 'Status'], ordenar(db.atacado.filter(a => a.clienteId === id)).map(a => [fdata(a.data), NS[a.sabor], a.qtd, R$(a.totalLiquido), a.status === 'PAGO' ? 'Pago' : 'Pendente']))); }
+function histCliente(id) { const c = db.clientes.find(x => x.id === id); info('Histórico — ' + c.nome, tbl(['Data', 'Sabor', 'Qtd', 'Valor', 'Status'], ordenar(db.atacado.filter(a => a.clienteId === id)).map(a => [fdata(a.data), resumoAt(a), a.qtd, R$(a.totalLiquido), a.status === 'PAGO' ? 'Pago' : 'Pendente']))); }
 function irPara(id) { switchTab(id); }
 
 /* PDV */
@@ -587,7 +619,7 @@ function updateAll() {
   aplicarCustom(); refreshSel(); bnavSync();
   if (!$('bdg')) buildNav(); else if (visiveis().length !== $('nav').children.length) { buildNav(); }
   const ativa = document.querySelector('.tab.on'); if (!ativa) return;
-  const id = ativa.id.slice(4); if (id !== 'config') R[id](); if (id !== 'dashboard') { try { rDash(); } catch (e) { } }
+  const id = ativa.id.slice(4); if (id !== 'config') { try { R[id](); } catch (e) { console.error(id, e); } } if (id !== 'dashboard') rDash();
 }
 function entrar() {
   const e = $('l-email').value.trim(), s = $('l-senha').value; if (!e || !s) return $('lerr').textContent = 'Digite e-mail e senha.';
