@@ -12,7 +12,7 @@ const firebaseConfig = {
 const ADMIN = 'luyan@pudim.com', VIEWER = 'beatriz@pudim.com';
 const LS = 'pudimDB_v2', LSV = 'pudimVersoes_v2';
 const EMP = { fantasia: 'Pudim Du Cariri', cnpj: '64.056.475/0001-82', tel: '(88) 99644-5147', pix: 'pudimducariri@gmail.com' };
-const KEYS = ['clientes', 'vendas', 'atacado', 'despesas', 'pagamentos', 'producoes', 'estoqueMov', 'ajustes', 'compras', 'sabores', 'itensExtra', 'eventos'];
+const KEYS = ['clientes', 'vendas', 'atacado', 'despesas', 'pagamentos', 'producoes', 'estoqueMov', 'ajustes', 'compras', 'sabores', 'itensExtra', 'eventos', 'log', 'fechamentos'];
 
 /* ============ HELPERS ============ */
 const $ = id => document.getElementById(id);
@@ -72,13 +72,17 @@ const FL = ['Leite condensado (un)', 'Leite integral (litro)', 'Ovos (pacote c/ 
 const TABS = [
   ['dashboard', '📊', 'Painel'], ['estoque', '🏭', 'Estoque e produção'], ['vendas', '🛒', 'Varejo (PDV)'], ['atacado', '📦', 'Atacado'], ['clientes', '👥', 'Clientes'], ['eventos', '🎄', 'Eventos'],
   ['receber', '⏳', 'A receber'], ['compras', '🧾', 'Compra direta'], ['precos', '📈', 'Histórico de preços'], ['contagem', '🔢', 'Contagem mensal'], ['rateio', '⚖️', 'Rateio'],
-  ['despesas', '💸', 'Despesas'], ['saques', '🏧', 'Saques'], ['config', '⚙️', 'Configurações']
+  ['despesas', '💸', 'Despesas'], ['saques', '🏧', 'Saques'], ['log', '🕘', 'Alterações'], ['fechamento', '🔒', 'Fechamento do mês'], ['config', '⚙️', 'Configurações']
 ];
 const CFG0 = {
   precoUnd: 15, precoCombo: 40, custoCopo: 1.5, taxaCredIns: 4.98, taxaCredApr: 3.09, taxaDebIns: 1.99, taxaDebApr: 0.89, taxaOnline: 2.99, diasAviso: 7,
   insumo: { varejo: { tradicional: 6.22, ninho: 7.29, brigadeirao: 6.96 }, atacado: { tradicional: 5.12, ninho: 6.19, brigadeirao: 5.86 } },
   ficha: { lc: 6.5, li: 4.5, ov: 14, ac: 4, cp: 1.5, tp: 1.2, ad: .55, sc: .9, co: .2, lp: 40, nt: 75, cl: 10, ch: 60, gr: 40 },
-  abasViewer: { dashboard: true, contagem: true, estoque: true }, setupFeito: false
+  abasViewer: { dashboard: true, contagem: true, estoque: true }, setupFeito: false,
+  legado: {
+    varejo: { bruto: 28063.00, liq: 25839.10, ent: 774.00, q: 1977, ins: 12394.96, cg: 2139.77, mo: 2953.12, l: 8351.24, fundo: 1088.82, lu: 3880.82, bea: 2675.96, giro: 705.64 },
+    atacado: { bruto: 42665.22, ent: -495.82, liq: 42169.40, q: 3904, ins: 21605.84, cg: 3398.80, mo: 4458.73, l: 12706.03, fundo: 1691.37, lu: 5987.80, bea: 4134.94, giro: 891.92 }
+  }
 };
 let db, role = 'viewer', email = '', carregou = false, ultimoTotal = 0, ultimoSync = {}, ultimoJSON = '', cart = [], edit = {};
 
@@ -92,13 +96,13 @@ const SAB0 = [
 function carregar(d) {
   d = d || {}; const c = d.config || {}, i = c.insumo || {};
   const fp = { ...PRE0 }; if (c.ficha) Object.entries(MAPF).forEach(([a, b]) => { if (c.ficha[a] !== undefined) fp[b] = c.ficha[a]; }); Object.assign(fp, c.fichaPrecos);
-  const o = { config: { ...CFG0, ...c, insumo: { varejo: { ...CFG0.insumo.varejo, ...i.varejo }, atacado: { ...CFG0.insumo.atacado, ...i.atacado } }, ficha: { ...CFG0.ficha, ...c.ficha }, abasViewer: { ...CFG0.abasViewer, ...c.abasViewer }, fichaPrecos: fp, inativos: { ...c.inativos }, minimos: { ...c.minimos }, itensNome: { ...c.itensNome } } };
+  const o = { config: { ...CFG0, ...c, insumo: { varejo: { ...CFG0.insumo.varejo, ...i.varejo }, atacado: { ...CFG0.insumo.atacado, ...i.atacado } }, ficha: { ...CFG0.ficha, ...c.ficha }, abasViewer: { ...CFG0.abasViewer, ...c.abasViewer }, fichaPrecos: fp, inativos: { ...c.inativos }, minimos: { ...c.minimos }, itensNome: { ...c.itensNome }, legado: { varejo: { ...CFG0.legado.varejo, ...(c.legado || {}).varejo }, atacado: { ...CFG0.legado.atacado, ...(c.legado || {}).atacado } } } };
   KEYS.forEach(k => o[k] = arr(d[k]));
   const ex = o.sabores; o.sabores = SAB0.map(b => ex.find(x => x.id === b.id) || JSON.parse(JSON.stringify(b))).concat(ex.filter(x => !SAB0.some(b => b.id === x.id)));
   return o;
 }
 db = carregar(null);
-const total = d => KEYS.reduce((a, k) => a + arr(d[k]).length, 0);
+const total = d => KEYS.filter(k => k !== 'log' && k !== 'fechamentos').reduce((a, k) => a + arr(d[k]).length, 0);
 const custo = (s, canal) => db.config.insumo[canal][s] || 0;
 
 /* ============ GRAVAÇÃO SEGURA ============ */
@@ -115,6 +119,7 @@ function guardar(forcar) {
   const t = total(db);
   if (!forcar && ultimoTotal > 10 && t < ultimoTotal * 0.5) { db = carregar(JSON.parse(ultimoJSON)); updateAll(); return falha('Gravação bloqueada: os dados ficaram muito menores. Nada foi alterado.'); }
   versoes();
+  if (ultimoJSON) { try { registrarLog(carregar(JSON.parse(ultimoJSON)), forcar); } catch (e) { console.error('log', e); } }
   // UMA única gravação com tudo que mudou (várias gravações seguidas faziam a nuvem devolver dados antigos e apagar o resto)
   const up = {}; KEYS.concat('config').forEach(k => { const j = JSON.stringify(db[k]); if (j !== ultimoSync[k]) { const v = JSON.parse(j); up[k] = Array.isArray(v) && !v.length ? null : v; } });
   ultimoTotal = t; ultimoJSON = JSON.stringify(db);
@@ -160,9 +165,11 @@ function caixas() {
   const sq = t => db.pagamentos.filter(p => p.tipo === t).reduce((a, p) => a + num(p.valor), 0);
   const ev = []; db.vendas.forEach(v => { if (num(v.entrega) > 0) ev.push({ d: v.data || '', id: v.id, t: 'e', v: num(v.entrega) }); });
   db.despesas.filter(d => catDesp(d) === 'ENTREGADOR').forEach(d => ev.push({ d: d.data || '', id: d.id, t: 's', v: dtot(d) }));
-  ev.sort((a, b) => a.d === b.d ? a.id - b.id : (a.d < b.d ? -1 : 1));
-  let gav = 0, desc = 0; ev.forEach(e => { if (e.t === 'e') gav += e.v; else if (gav >= e.v) gav -= e.v; else { desc += e.v - gav; gav = 0; } });
-  const c = { Insumos: sm('ins') - dsp('INSUMOS') - dsp('EMBALAGEM') + aj('Insumos'), CG: sm('cg') - dsp('GASTOS GERAIS') - desc + aj('CG'), MO: sm('mo') - sq('MaoObra') + aj('MO'), Fundo: sm('fundo') - dsp('MARKETING') + aj('Fundo'), Luyan: sm('lu') - sq('Luyan') + aj('Luyan'), Beatriz: sm('bea') - sq('Beatriz') + aj('Beatriz'), Entrega: gav + aj('Entrega') };
+  db.ajustes.filter(a => a.caixa === 'Entrega').forEach(a => ev.push({ d: a.data || '', id: a.id, t: 'a', v: num(a.valor) }));
+  const rk = e => e.t === 's' ? 1 : 0;
+  ev.sort((a, b) => a.d === b.d ? (rk(a) - rk(b) || a.id - b.id) : (a.d < b.d ? -1 : 1));
+  let gav = 0, desc = 0; ev.forEach(e => { if (e.t === 'e' || e.t === 'a') gav += e.v; else { const t = Math.min(Math.max(gav, 0), e.v); gav -= t; desc += e.v - t; } });
+  const c = { Insumos: sm('ins') - dsp('INSUMOS') - dsp('EMBALAGEM') + aj('Insumos'), CG: sm('cg') - dsp('GASTOS GERAIS') - desc + aj('CG'), MO: sm('mo') - sq('MaoObra') + aj('MO'), Fundo: sm('fundo') - dsp('MARKETING') + aj('Fundo'), Luyan: sm('lu') - sq('Luyan') + aj('Luyan'), Beatriz: sm('bea') - sq('Beatriz') + aj('Beatriz'), Entrega: gav };
   c.total = Object.values(c).reduce((a, b) => a + b, 0) + aj('Caixa Geral'); return c;
 }
 function recompra() {
@@ -258,9 +265,16 @@ function excluir(l, id) {
   if (l === 'compras') { db.estoqueMov = db.estoqueMov.filter(x => x.ref !== id); db.despesas = db.despesas.filter(x => x.ref !== id); }
   guardar(); toast('Excluído.');
 }
+const pg = {}, histOpen = {};
+const HT = { atacado: 'Histórico de pedidos de atacado', eventos: 'Eventos cadastrados', producoes: 'Histórico de produção', estoqueMov: 'Histórico de ajustes de estoque', despesas: 'Histórico de despesas', pagamentos: 'Histórico de saques', compras: 'Histórico de compras', vendas: 'Histórico de vendas (varejo)' };
+function hist(l, h, todos, fn, vz) {
+  const lim = pg[l] || 10, n = todos.length, falta = n - lim, aberto = histOpen[l] ?? !['estoqueMov', 'producoes'].includes(l);
+  return `<details class="hist" ${aberto ? 'open' : ''} ontoggle="histOpen['${l}']=this.open"><summary><span>${HT[l]}</span><b>${n}</b></summary>${tbl(h, todos.slice(0, lim).map(fn), vz)}${falta > 0 ? `<div class="row mais"><button class="b" onclick="verMais('${l}')">Ver mais ${Math.min(10, falta)} (restam ${falta})</button></div>` : ''}</details>`;
+}
+const verMais = l => { pg[l] = (pg[l] || 10) + 10; updateAll(); };
 function rLista(l) {
   const s = SCH[l], el = $('lista-' + l); if (!el) return;
-  el.innerHTML = tbl([...s.h, 'Ações'], ordenar(db[l]).slice(0, 80).map(x => [...s.r(x), (s.ex ? s.ex(x) : '') + (s.semEdit ? '' : bt('✏️', `editar('${l}',${x.id})`)) + bt('🗑️', `excluir('${l}',${x.id})`, 'red')]));
+  el.innerHTML = hist(l, [...s.h, 'Ações'], ordenar(db[l]), x => [...s.r(x), (s.ex ? s.ex(x) : '') + (s.semEdit ? '' : bt('✏️', `editar('${l}',${x.id})`)) + bt('🗑️', `excluir('${l}',${x.id})`, 'red')]);
 }
 const lista = l => `<div class="adm" id="form-${l}"></div><div id="lista-${l}"></div>`;
 
@@ -286,7 +300,7 @@ const H = {
     <div><label>Qtd de sacolas</label><input id="pv-sacq" type="number" value="1" min="0"></div></div>
     <div class="paybar"><div class="alert row" style="justify-content:space-between"><b>Total a cobrar</b><b id="pv-total" style="font-size:1.5rem">R$ 0,00</b></div>
     <button class="b pri" onclick="pdvFinal()">Finalizar venda</button></div></div>
-    <h4>Histórico de vendas</h4><div id="lista-vendas"></div>`,
+    <div id="lista-vendas"></div>`,
   atacado: () => lista('atacado'), clientes: () => `<div class="alert" id="rc-aviso" hidden></div>${lista('clientes').replace('<div id="lista-clientes"></div>', '')}<div id="clientes-tab"></div>`,
   receber: () => `<div class="grid" id="rec-k"></div><div id="rec-t"></div>`,
   compras: () => lista('compras'), precos: () => `<div id="precos-body"></div>`,
@@ -313,7 +327,15 @@ function rDash0() {
   const dsp = db.despesas.filter(d => !m || (d.data || '').startsWith(m)).reduce((a, d) => a + dtot(d), 0);
   $('aviso-setup').innerHTML = db.config.setupFeito || role !== 'admin' || db.ajustes.length ? '' : `<div class="alert">Sistema novo: confira e aplique o <b>saldo inicial</b> em Configurações. <button class="b sm" onclick="irPara('config')">Abrir</button></div>`;
   const cx = (t, k, ex) => `<div class="k c-${k} ${c[k] < -0.004 ? 'neg' : ''}"><small>${t}</small><b>${R$(c[k])}</b><div class="row">${ex || ''}<button class="b sm adm" title="Ajustar saldo" onclick="ajustar('${k}')">⚖️</button></div></div>`;
-  const sec = (key, tit, can) => { const l = L.filter(x => x.canal === can), s = k => l.reduce((a, x) => a + x[k], 0); return `<details class="sec" ${dtog(key)}><summary><span>${tit}</span><b class="${s('l') < -0.004 ? 'neg' : ''}">${R$(s('l'))}<small> lucro</small></b></summary><div class="grid">${kpi('Fat. bruto', R$(s('bruto')))}${kpi('Fat. líquido', R$(s('liq')))}${kpi('Qtd vendida', s('q'))}${KB('Insumo fixo', s('ins'))}${KB('Custos gerais', s('cg'))}${KB('Mão de obra', s('mo'))}${KB('Lucro líquido', s('l'), 'ok')}${kpi('Fundo empresa', R$(s('fundo')))}${kpi('Luyan', R$(s('lu')))}${kpi('Beatriz', R$(s('bea')))}</div></details>`; };
+  const sec = (key, tit, can) => {
+    const l = L.filter(x => x.canal === can), g = (!m && db.config.legado && db.config.legado[can]) || {}, s = k => l.reduce((a, x) => a + x[k], 0) + num(g[k]), K = kpi;
+    const noMes = d => !m || (d || '').startsWith(m);
+    const ent = can === 'varejo' ? K('Taxa entrega', R$(db.vendas.filter(v => !v.evento && noMes(v.data)).reduce((a, v) => a + num(v.entrega), 0) + num(g.ent)))
+      : can === 'atacado' ? KB('Logística (desc)', num(g.ent) - db.atacado.filter(a => a.status === 'PAGO' && noMes(a.data)).reduce((a, x) => a + num(x.desconto), 0)) : '';
+    const bruto = K('Fat. bruto', R$(s('bruto'))), liq = K('Fat. líquido', R$(s('liq')));
+    const ordem = can === 'atacado' ? bruto + ent + liq : bruto + liq + ent;
+    return `<details class="sec" ${dtog(key)}><summary><span>${tit}</span><b class="${s('l') < -0.004 ? 'neg' : ''}">${R$(s('l'))}<small> lucro</small></b></summary><div class="grid">${ordem}${K('Qtd vendida', s('q'))}${KB('Insumo fixo', s('ins'))}${KB('Custos gerais', s('cg'))}${KB('Mão de obra', s('mo'))}${KB('Lucro líquido', s('l'), 'ok')}${K('Fundo empresa', R$(s('fundo')))}${K('Luyan', R$(s('lu')))}${K('Beatriz', R$(s('bea')))}${g.giro ? K('Giro (legado)', R$(g.giro)) : ''}</div></details>`;
+  };
   const chip = (ic, n, lb, k) => n ? `<button class="chip ${k}" onclick="avisos('${k}')"><span>${ic}</span>${lb}<i>${n}</i></button>` : '';
   const chips = chip('📞', rc.length, 'Contatar', 'rc') + chip('⏳', pend.length, 'Vencidos', 'pend') + chip('📦', baixos.length, 'Estoque baixo', 'est');
   $('dash-body').innerHTML = `
@@ -344,7 +366,7 @@ R.contagem = () => {
   const mn = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
   $('cont-body').innerHTML = `<div class="card">Atacado conta no <b>mês do pedido</b>, mas só aparece aqui depois de marcado como <b>pago</b>.</div>` + tbl(['Mês', 'Tradicional', 'Ninho', 'Brigadeirão', 'Outros sabores', 'Total vendido', 'Fat. bruto', 'Fat. líquido', 'Lucro líquido', 'Despesas'], Object.keys(M).sort().reverse().map(k => { const o = M[k], [y, mm] = k.split('-'); return [mm ? `<b>${mn[mm - 1]}/${y}</b>` : k, o.t, o.n, o.b, o.x, `<b>${o.q} un</b>`, R$(o.br), R$(o.lq), `<b style="color:var(--ok)">${R$(o.l)}</b>`, `<span class="neg">${R$(o.d)}</span>`]; }));
 };
-R.vendas = () => { $('lista-vendas').innerHTML = tbl(['#', 'Data', 'Produto', 'Sabores', 'Líquido', 'Pgto', ''], ordenar(db.vendas).slice(0, 80).map(v => ['#' + v.num, fdata(v.data), `${v.produto} (${v.qtd}x)${v.evento ? ' 🎄' : ''}`, nomeSab(v), R$(v.liquido), v.pgto, bt('🗑️', `excluir('vendas',${v.id})`, 'red')])); };
+R.vendas = () => { $('lista-vendas').innerHTML = hist('vendas', ['#', 'Data', 'Produto', 'Sabores', 'Líquido', 'Pgto', ''], ordenar(db.vendas), v => ['#' + v.num, fdata(v.data), `${v.produto} (${v.qtd}x)${v.evento ? ' 🎄' : ''}`, nomeSab(v), R$(v.liquido), v.pgto, bt('🗑️', `excluir('vendas',${v.id})`, 'red')]); };
 R.atacado = () => { const s = $('f-atacado-clienteId'); if (s && !edit.atacado) { const v = s.value; s.innerHTML = optCli().map(x => `<option value="${x[0]}">${x[1]}</option>`).join(''); if ([...s.options].some(o => o.value === v)) s.value = v; } rLista('atacado'); };
 R.clientes = () => {
   const rc = recompra(), n = rc.filter(x => x.alerta).length;
@@ -466,6 +488,7 @@ function rConfig() {
   <div class="card"><h3>Preços, taxas e custos</h3><div class="fg">${CF.map(([k, l]) => `<div><label>${l}</label>${inp('c-' + k, 'number', C[k])}</div>`).join('')}${CIf().map(([k, l]) => `<div><label>${l}</label>${inp('c-' + k, 'number', gp(C, k))}</div>`).join('')}
   <div><label>Aviso de recompra (dias, padrão)</label>${inp('c-diasAviso', 'select', C.diasAviso, [[7, '7 dias'], [15, '15 dias']])}</div></div><div class="row"><button class="b pri" onclick="salvarCfg()">Salvar configurações</button></div></div>
   ${cfgFicha()}
+  ${cfgLegado()}
   <div class="card"><h3>Abas que a Beatriz pode ver</h3><div class="fg">${TABS.filter(t => t[0] !== 'config').map(t => `<label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" id="av-${t[0]}" ${C.abasViewer[t[0]] ? 'checked' : ''}> ${t[2]}</label>`).join('')}</div><div class="row"><button class="b pri" onclick="salvarAbas()">Salvar permissões</button></div></div>
   ${C.setupFeito || db.ajustes.length ? '' : `<div class="card"><h3>Saldo inicial (valores dos prints — confira)</h3><div class="fg">${SI_C.map(([k, v]) => `<div><label>Caixinha ${k} (R$)</label>${inp('si-c-' + k, 'number', v)}</div>`).join('')}${Object.keys(SI_E).map(k => `<div><label>${ITENS[k][0]} (${ITENS[k][1]})</label>${inp('si-e-' + k, 'number', SI_E[k])}</div>`).join('')}</div><div class="row"><button class="b pri" onclick="aplicarSaldo()">Aplicar saldo inicial (uma vez)</button></div></div>`}
   ${cfgSabores()}
@@ -603,6 +626,115 @@ R.eventos = () => {
   rLista('eventos'); const L = linhasFin().filter(x => x.canal === 'evento');
   $('ev-rel').innerHTML = tbl(['Evento', 'Unidades', 'Fat. bruto', 'Fat. líquido', 'Insumo + embalagem', 'Lucro líquido'], db.eventos.map(e => { const l = L.filter(x => x.ev === e.id), t = k => l.reduce((a, x) => a + x[k], 0); return [`<b>${e.nome}</b>`, t('q'), R$(t('bruto')), R$(t('liq')), R$(t('ins')), `<b style="color:var(--ok)">${R$(t('l'))}</b>`]; }), 'Nenhum evento ainda.');
 };
+
+
+/* ============ HISTÓRICO DE ALTERAÇÕES, DESFAZER, FECHAMENTO, VALORES ANTIGOS ============ */
+const LOGC = ['vendas', 'atacado', 'despesas', 'pagamentos', 'ajustes', 'producoes', 'estoqueMov', 'compras', 'fechamentos'];
+const LOGN = { vendas: 'Varejo', atacado: 'Atacado', despesas: 'Despesas', pagamentos: 'Saques', ajustes: 'Ajustes', producoes: 'Produção', estoqueMov: 'Estoque', compras: 'Compras', fechamentos: 'Fechamento', config: 'Configurações', sistema: 'Sistema' };
+const CXN = { total: 'Total em conta', Insumos: 'Insumo fixo', CG: 'Custos gerais', MO: 'Mão de obra', Fundo: 'Fundo empresa', Luyan: 'Luyan', Beatriz: 'Beatriz', Entrega: 'Gaveta entregas' };
+const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+const mesTxt = m => { const [y, mm] = String(m).split('-'); return MESES[mm - 1] ? MESES[mm - 1] + '/' + y : m; };
+function dLog(c, r) {
+  try {
+    switch (c) {
+      case 'vendas': return `Venda #${r.num}: ${R$(r.liquido)} (${r.produto} ${r.qtd}x, ${r.pgto})`;
+      case 'atacado': return `Pedido #${r.num} de ${r.cliente}: ${R$(r.totalLiquido)} (${r.status === 'PAGO' ? 'pago' : 'pendente'})`;
+      case 'despesas': return `Despesa "${r.item}": ${R$(dtot(r))} (${r.categoria})`;
+      case 'pagamentos': return `Saque de ${R$(r.valor)} (${r.tipo})`;
+      case 'ajustes': return `Ajuste em ${CXN[r.caixa] || r.caixa}: ${R$(r.valor)}`;
+      case 'producoes': return `Produção: ${r.qtd} receita(s) de ${NS[r.sabor] || r.sabor}`;
+      case 'estoqueMov': return `Estoque ${IT(r.item)[0]}: ${r.tipo === 'entrada' ? '+' : '−'}${r2(r.qtd)} ${r.desc || ''}`;
+      case 'compras': return `Compra de ${IT(r.item)[0]}: ${R$(r.valor)}`;
+      case 'fechamentos': return `Fechamento de ${mesTxt(r.mes)}`;
+    }
+  } catch (e) { }
+  return c;
+}
+function caixasDe(d) { const s = db; db = d; try { return caixas(); } finally { db = s; } }
+function flat(o, p = '', r = {}) { for (const k in (o || {})) { const v = o[k], n = p ? p + '.' + k : k; if (v && typeof v === 'object') flat(v, n, r); else r[n] = v; } return r; }
+function registrarLog(velho, forcar) {
+  const ts = Date.now(), out = [], imp = {};
+  try { const a = caixasDe(velho), b = caixas(); Object.keys(b).forEach(k => { if (Math.abs(b[k] - a[k]) >= 0.005) imp[k] = [r2(a[k]), r2(b[k])]; }); } catch (e) { }
+  const mk = (col, acao, desc, rid, antes, antesDesc) => out.push({ id: uid(), ts, quem: email, col, acao, desc, rid: rid ?? null, antes: antes || null, antesDesc: antesDesc || null, v: imp });
+  if (forcar) mk('sistema', 'restaurou', 'Backup restaurado ou importado');
+  else {
+    LOGC.forEach(c => {
+      const A = new Map(arr(velho[c]).map(x => [x.id, x])), B = new Map(arr(db[c]).map(x => [x.id, x]));
+      const derivado = x => (c === 'estoqueMov' || c === 'despesas') && x.ref;
+      B.forEach((r, id) => { if (derivado(r)) return; const o = A.get(id); if (!o) mk(c, 'criou', dLog(c, r), id); else if (JSON.stringify(o) !== JSON.stringify(r)) mk(c, 'editou', dLog(c, r), id, o, dLog(c, o)); });
+      A.forEach((r, id) => { if (!B.has(id) && !derivado(r)) mk(c, 'excluiu', dLog(c, r), id, r); });
+    });
+    const fa = flat(velho.config), fb = flat(db.config), mud = Object.keys({ ...fa, ...fb }).filter(k => !k.startsWith('abasViewer') && !k.startsWith('inativos') && fa[k] !== fb[k]);
+    if (mud.length) mk('config', 'editou', 'Configurações: ' + mud.slice(0, 6).map(k => `${k}: ${fa[k] ?? '-'} → ${fb[k] ?? '-'}`).join('; ') + (mud.length > 6 ? ` (+${mud.length - 6})` : ''));
+  }
+  if (out.length) { db.log = db.log.concat(out); if (db.log.length > 800) db.log = db.log.slice(-800); }
+}
+function desfazer(id) {
+  const e = db.log.find(x => x.id === id); if (!e) return;
+  if (!confirm(`Desfazer esta alteração?\n\n${e.desc}\n\nO lançamento volta ao estado de antes.`)) return;
+  const l = e.col, A = db[l];
+  if (e.acao === 'criou') { db[l] = A.filter(x => x.id !== e.rid); if (l === 'compras') { db.estoqueMov = db.estoqueMov.filter(x => x.ref !== e.rid); db.despesas = db.despesas.filter(x => x.ref !== e.rid); } }
+  else if (e.acao === 'excluiu') { if (A.some(x => x.id === e.rid)) return toast('Esse lançamento já existe de novo.', 1); db[l].push(e.antes); if (l === 'compras') SCH.compras.pos(e.antes, true); }
+  else if (e.acao === 'editou') { const i = A.findIndex(x => x.id === e.rid); if (i < 0) return toast('Esse lançamento não existe mais.', 1); A[i] = e.antes; }
+  e.desfeito = true; guardar(); toast('Alteração desfeita.');
+}
+const logF = { col: '', acao: '', mes: '', n: 10 };
+const AC = { criou: ['Criou', 'ok'], editou: ['Editou', 'wa'], excluiu: ['Excluiu', 'no'], restaurou: ['Restaurou', 'wa'] };
+H.log = () => `<details class="fd"><summary>🔎 Filtros</summary><div class="fg"><div><label>Tipo</label><select id="lf-col" onchange="logFiltro()"><option value="">Todos</option>${Object.entries(LOGN).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div><div><label>Ação</label><select id="lf-acao" onchange="logFiltro()"><option value="">Todas</option><option value="criou">Criou</option><option value="editou">Editou</option><option value="excluiu">Excluiu</option></select></div><div><label>Mês</label><input id="lf-mes" type="month" onchange="logFiltro()"></div></div><div class="row"><button class="b sm" onclick="logLimpa()">Limpar filtros</button></div></details><div id="log-lista"></div>`;
+function logFiltro() { logF.col = $('lf-col').value; logF.acao = $('lf-acao').value; logF.mes = $('lf-mes').value; logF.n = 10; R.log(); }
+function logLimpa() { ['lf-col', 'lf-acao', 'lf-mes'].forEach(i => $(i).value = ''); logFiltro(); }
+const impHTML = v => Object.entries(v || {}).map(([k, [a, d]]) => `<span class="imp ${d > a ? 'up' : 'dn'}">${CXN[k] || k}: ${d > a ? '+' : '−'}${R$(Math.abs(d - a))} <small>(${R$(a)} → ${R$(d)})</small></span>`).join('') || '<span class="imp">Sem efeito nos valores</span>';
+R.log = () => {
+  const el = $('log-lista'); if (!el) return;
+  const dm = ts => { const d = new Date(ts); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 7); };
+  const todos = [...db.log].reverse().filter(e => (!logF.col || e.col === logF.col) && (!logF.acao || e.acao === logF.acao) && (!logF.mes || dm(e.ts) === logF.mes)), n = todos.length;
+  el.innerHTML = n ? todos.slice(0, logF.n).map(e => { const ac = AC[e.acao] || [e.acao, 'wa'], pode = !e.desfeito && e.rid != null && LOGC.includes(e.col) && (e.acao === 'criou' || e.antes);
+    return `<div class="le"><div class="lh"><span class="tag ${ac[1]}">${ac[0]}</span><b>${LOGN[e.col] || e.col}</b><small>${new Date(e.ts).toLocaleString('pt-BR')}, ${e.quem || ''}</small></div><div class="ld">${e.desc}</div>${e.antesDesc ? `<div class="lo">Antes: ${e.antesDesc}</div>` : ''}<div class="li">${impHTML(e.v)}</div>${e.desfeito ? '<span class="tag no">Desfeito</span>' : (pode ? `<button class="b sm adm" onclick="desfazer(${e.id})">↩ Desfazer</button>` : '')}</div>`; }).join('') + (n > logF.n ? `<div class="row mais"><button class="b" onclick="logF.n+=10;R.log()">Ver mais ${Math.min(10, n - logF.n)} (restam ${n - logF.n})</button></div>` : '')
+    : '<div class="card vz">Nenhuma alteração encontrada.</div>';
+};
+/* Fechamento do mês */
+const CATL = { INSUMOS: 'Insumos', EMBALAGEM: 'Embalagem', 'GASTOS GERAIS': 'Gastos gerais', MARKETING: 'Marketing', ENTREGADOR: 'Entregador' }, SQL = { MaoObra: 'Mão de obra', Luyan: 'Luyan', Beatriz: 'Beatriz' };
+const CANAIS = [['varejo', 'Varejo'], ['atacado', 'Atacado pago'], ['evento', 'Eventos']];
+const MET = [['bruto', 'Fat. bruto'], ['liq', 'Fat. líquido'], ['q', 'Qtd vendida'], ['ins', 'Insumo fixo'], ['cg', 'Custos gerais'], ['mo', 'Mão de obra'], ['l', 'Lucro líquido'], ['fundo', 'Fundo empresa'], ['lu', 'Luyan'], ['bea', 'Beatriz']];
+function resumoMes(m) {
+  const L = linhasFin().filter(x => (x.data || '').startsWith(m)), can = {}, desp = {}, saq = {}, cx = {}, c = caixas();
+  CANAIS.forEach(([k]) => { const l = L.filter(x => x.canal === k), s = f => r2(l.reduce((a, x) => a + x[f], 0)); can[k] = {}; MET.forEach(([f]) => can[k][f] = s(f)); });
+  db.despesas.filter(d => (d.data || '').startsWith(m)).forEach(d => { const k = catDesp(d); desp[k] = r2((desp[k] || 0) + dtot(d)); });
+  db.pagamentos.filter(p => (p.data || '').startsWith(m)).forEach(p => { saq[p.tipo] = r2((saq[p.tipo] || 0) + num(p.valor)); });
+  Object.keys(c).forEach(k => cx[k] = r2(c[k]));
+  return { can, desp, saq, cx };
+}
+function tabResumo(r) {
+  const f = (k, v) => k === 'q' ? v : R$(v), soma = (k) => CANAIS.reduce((a, [c]) => a + num(r.can[c][k]), 0);
+  const dp = Object.entries(r.desp), sq = Object.entries(r.saq);
+  return `<h4>Vendas e resultado do mês</h4>${tbl(['', ...CANAIS.map(x => x[1]), 'Total'], MET.map(([k, n]) => [n, ...CANAIS.map(([c]) => f(k, r.can[c][k])), `<b>${f(k, soma(k))}</b>`]))}
+  <h4>Despesas do mês</h4>${tbl(['Categoria', 'Valor'], [...dp.map(([k, v]) => [CATL[k] || k, R$(v)]), ['<b>Total</b>', `<b>${R$(dp.reduce((a, x) => a + x[1], 0))}</b>`]], 'Sem despesas no mês.')}
+  <h4>Saques do mês</h4>${tbl(['Caixinha', 'Valor'], sq.map(([k, v]) => [SQL[k] || k, R$(v)]), 'Sem saques no mês.')}
+  <h4>Saldo das caixinhas (no momento do fechamento)</h4>${tbl(['Caixinha', 'Saldo'], Object.entries(CXN).map(([k, n]) => [n, R$(r.cx[k] || 0)]))}`;
+}
+H.fechamento = () => `<div class="card"><h3>Fechar o mês</h3><p style="color:var(--mu)">Guarda uma foto dos números do mês (vendas, lucro, despesas, saques e saldo das caixinhas). Depois de fechado, o resumo não muda mais, mesmo que você lance algo novo.</p><div class="fg"><div><label>Mês</label><input id="fc-mes" type="month" onchange="R.fechamento()"></div></div><div class="row adm"><button class="b pri" onclick="fecharMes()">🔒 Fechar este mês</button></div></div><div id="fc-prev"></div><h4>Meses fechados</h4><div id="fc-lista"></div>`;
+R.fechamento = () => {
+  const mi = $('fc-mes'); if (!mi.value) mi.value = hoje().slice(0, 7);
+  const fe = db.fechamentos.find(x => x.mes === mi.value);
+  $('fc-prev').innerHTML = `<h4>${fe ? 'Já fechado em ' + new Date(fe.ts).toLocaleDateString('pt-BR') + ': ' : 'Prévia de '}${mesTxt(mi.value)}</h4>` + tabResumo(fe || resumoMes(mi.value));
+  $('fc-lista').innerHTML = tbl(['Mês', 'Fat. líquido', 'Lucro', 'Despesas', 'Total em conta', 'Fechado em', 'Ações'], [...db.fechamentos].sort((a, b) => a.mes < b.mes ? 1 : -1).map(f => [`<b>${mesTxt(f.mes)}</b>`, R$(CANAIS.reduce((a, [c]) => a + num(f.can[c].liq), 0)), R$(CANAIS.reduce((a, [c]) => a + num(f.can[c].l), 0)), R$(Object.values(f.desp || {}).reduce((a, v) => a + v, 0)), R$(f.cx.total), `${new Date(f.ts).toLocaleDateString('pt-BR')}, ${f.quem || ''}`, bt('Ver', `$('fc-mes').value='${f.mes}';R.fechamento();window.scrollTo(0,0)`, 'v') + bt('🗑️', `excluirFech(${f.id})`, 'red')]), 'Nenhum mês fechado ainda.');
+};
+function fecharMes() {
+  const m = $('fc-mes').value; if (!m) return toast('Escolha o mês.', 1);
+  const ja = db.fechamentos.find(x => x.mes === m);
+  if (ja && !confirm(`${mesTxt(m)} já foi fechado. Substituir pelo fechamento de agora?`)) return;
+  if (!ja && !confirm(`Fechar ${mesTxt(m)}? O resumo fica salvo e não muda mais.`)) return;
+  db.fechamentos = db.fechamentos.filter(x => x.mes !== m); db.fechamentos.push({ id: uid(), mes: m, ts: Date.now(), quem: email, ...resumoMes(m) });
+  guardar(); toast(mesTxt(m) + ' fechado.');
+}
+function excluirFech(id) { const f = db.fechamentos.find(x => x.id === id); if (f && confirm(`Excluir o fechamento de ${mesTxt(f.mes)}?`)) { db.fechamentos = db.fechamentos.filter(x => x.id !== id); guardar(); } }
+/* Valores antigos (só nos Resultados do painel) */
+const LGK = [['bruto', 'Fat. bruto'], ['liq', 'Fat. líquido'], ['ent', 'Taxa de entrega / logística'], ['q', 'Qtd vendida'], ['ins', 'Insumo fixo'], ['cg', 'Custos gerais'], ['mo', 'Mão de obra'], ['l', 'Lucro líquido'], ['fundo', 'Fundo empresa'], ['lu', 'Luyan'], ['bea', 'Beatriz'], ['giro', 'Giro (legado)']];
+function cfgLegado() {
+  const G = db.config.legado;
+  return `<div class="card"><h3>Histórico anterior (valores antigos)</h3><p style="color:var(--mu)">Somados só nos Resultados do painel (quando o filtro de mês está em "Todos"). Não mexem nas caixinhas.</p>${[['varejo', 'Varejo'], ['atacado', 'Atacado']].map(([c, n]) => `<h4>${n}</h4><div class="fg">${LGK.map(([k, l]) => `<div><label>${l}</label>${inp('lg-' + c + '-' + k, 'number', num(G[c][k]))}</div>`).join('')}</div>`).join('')}<div class="row"><button class="b pri" onclick="salvarLegado()">Salvar histórico anterior</button></div></div>`;
+}
+function salvarLegado() { ['varejo', 'atacado'].forEach(c => LGK.forEach(([k]) => db.config.legado[c][k] = num($('lg-' + c + '-' + k).value))); guardar(); toast('Histórico anterior salvo.'); }
 
 /* ============ NAVEGAÇÃO / INICIALIZAÇÃO ============ */
 const visiveis = () => TABS.filter(t => role === 'admin' || (t[0] !== 'config' && db.config.abasViewer[t[0]]));
