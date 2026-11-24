@@ -176,3 +176,11 @@ details.hist .mais{justify-content:center;padding:4px 12px 14px;margin:0}
 .imp.up{background:#EAF2DE;color:var(--ok)}.imp.dn{background:#FBE6E0;color:var(--red)}.imp small{font-weight:500;opacity:.8}
 .mais{display:flex;margin:6px 0 14px}
 @media(max-width:700px){details.hist .tw{padding:0 10px 4px}.k b{font-size:1.15rem}.k.big b{font-size:2.3rem}}
+/* barra de total compacta no celular (não cobre os campos) */
+@media(max-width:900px){
+ .paybar{display:flex;align-items:center;gap:10px;padding:8px 10px;margin-top:10px}
+ .paybar .alert{flex:1;margin:0;padding:0;display:flex;flex-direction:column;align-items:flex-start;gap:0;background:none;border:0}
+ .paybar .alert b:first-child{font-size:.68rem;color:var(--mu);font-weight:700}
+ .paybar #pv-total{font-size:1.3rem!important}
+ .paybar .b{width:auto;flex:none;padding:12px 20px}
+}
