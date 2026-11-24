@@ -366,7 +366,19 @@ R.contagem = () => {
   const mn = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
   $('cont-body').innerHTML = `<div class="card">Atacado conta no <b>mês do pedido</b>, mas só aparece aqui depois de marcado como <b>pago</b>.</div>` + tbl(['Mês', 'Tradicional', 'Ninho', 'Brigadeirão', 'Outros sabores', 'Total vendido', 'Fat. bruto', 'Fat. líquido', 'Lucro líquido', 'Despesas'], Object.keys(M).sort().reverse().map(k => { const o = M[k], [y, mm] = k.split('-'); return [mm ? `<b>${mn[mm - 1]}/${y}</b>` : k, o.t, o.n, o.b, o.x, `<b>${o.q} un</b>`, R$(o.br), R$(o.lq), `<b style="color:var(--ok)">${R$(o.l)}</b>`, `<span class="neg">${R$(o.d)}</span>`]; }));
 };
-R.vendas = () => { $('lista-vendas').innerHTML = hist('vendas', ['#', 'Data', 'Produto', 'Sabores', 'Líquido', 'Pgto', ''], ordenar(db.vendas), v => ['#' + v.num, fdata(v.data), `${v.produto} (${v.qtd}x)${v.evento ? ' 🎄' : ''}`, nomeSab(v), R$(v.liquido), v.pgto, bt('🗑️', `excluir('vendas',${v.id})`, 'red')]); };
+function pedidosVarejo() {
+  const out = []; let ult = null;
+  ordenar(db.vendas).forEach(v => {
+    const mesmo = ult && (v.pedido && ult.pedido ? v.pedido === ult.pedido : (!v.pedido && !ult.pedido && v.data === ult.data && v.pgto === ult.pgto && (v.evento || '') === (ult.evento || '') && Math.abs(v.id - ult.id) < 5000));
+    if (mesmo) out[out.length - 1].push(v); else out.push([v]); ult = v;
+  });
+  return out.map(it => { it.sort((a, b) => a.id - b.id); const ns = it.map(v => v.num), mn = Math.min(...ns), mx = Math.max(...ns); return { itens: it, ids: it.map(v => v.id), num: mn === mx ? '' + mn : mn + '–' + mx, data: it[0].data, pgto: it[0].pgto, evento: it[0].evento, liq: it.reduce((a, v) => a + num(v.liquido), 0), ins: it.reduce((a, v) => a + qtdTotal(v) * num(v.custoUnd), 0) }; });
+}
+function excluirVarejo(ids) {
+  if (!confirm(ids.length > 1 ? `Excluir este pedido inteiro (${ids.length} itens)? Os saldos serão recalculados.` : 'Excluir este registro? Os saldos serão recalculados.')) return;
+  db.vendas = db.vendas.filter(x => !ids.includes(x.id)); guardar(); toast('Excluído.');
+}
+R.vendas = () => { $('lista-vendas').innerHTML = hist('vendas', ['#', 'Data', 'Produto', 'Sabores', 'Líquido', 'Pgto', ''], pedidosVarejo(), p => ['#' + p.num, fdata(p.data), p.itens.map(v => `${v.produto} (${v.qtd}x)`).join(' + ') + (p.evento ? ' 🎄' : ''), p.itens.map(nomeSab).join(' + '), R$(p.liq), p.pgto, bt('🗑️', `excluirVarejo([${p.ids}])`, 'red')]); };
 R.atacado = () => { const s = $('f-atacado-clienteId'); if (s && !edit.atacado) { const v = s.value; s.innerHTML = optCli().map(x => `<option value="${x[0]}">${x[1]}</option>`).join(''); if ([...s.options].some(o => o.value === v)) s.value = v; } rLista('atacado'); };
 R.clientes = () => {
   const rc = recompra(), n = rc.filter(x => x.alerta).length;
@@ -428,10 +440,10 @@ function pdvFinal() {
   if (!cart.length) return toast('Carrinho vazio.', 1);
   const ev = evAtual(), C = db.config, pg = $('pv-pg').value, desc = num($('pv-desc').value), ent = num($('pv-ent').value), data = $('pv-data').value || hoje(), tb = cart.reduce((a, i) => a + i.bruto, 0);
   const tx = { 'Credito Insercao': C.taxaCredIns, 'Credito Aproximacao': C.taxaCredApr, 'Debito Insercao': C.taxaDebIns, 'Debito Aproximacao': C.taxaDebApr, 'Cartao Online': C.taxaOnline }[pg] || 0;
-  let n = prox(db.vendas);
+  const n = prox(db.vendas), ped = uid();
   cart.forEach((i, ix) => {
     const d = tb ? desc * i.bruto / tb : 0, cob = i.bruto - d, taxa = pg === 'PIX' ? ($('pv-asaas').checked && !ix ? 0.14 : 0) : cob * tx / 100, sabs = i.saboresCombo || [i.sabor];
-    db.vendas.push({ id: uid(), num: n++, data, produto: i.produto, sabor: i.sabor, saboresCombo: i.saboresCombo, qtd: i.qtd, pgto: pg, bruto: r2(i.bruto), desconto: r2(d), taxa: r2(taxa), liquido: r2(cob - taxa), entrega: ix ? 0 : r2(ent), sacTipo: ix ? 'nenhuma' : $('pv-sac').value, sacQtd: ix ? 0 : num($('pv-sacq').value), custoUnd: sabs.reduce((a, s) => a + custo(s, 'varejo'), 0) / sabs.length + (ev ? num(ev.custoExtra) : 0), evento: ev ? ev.id : '' });
+    db.vendas.push({ id: uid(), num: n, pedido: ped, data, produto: i.produto, sabor: i.sabor, saboresCombo: i.saboresCombo, qtd: i.qtd, pgto: pg, bruto: r2(i.bruto), desconto: r2(d), taxa: r2(taxa), liquido: r2(cob - taxa), entrega: ix ? 0 : r2(ent), sacTipo: ix ? 'nenhuma' : $('pv-sac').value, sacQtd: ix ? 0 : num($('pv-sacq').value), custoUnd: sabs.reduce((a, s) => a + custo(s, 'varejo'), 0) / sabs.length + (ev ? num(ev.custoExtra) : 0), evento: ev ? ev.id : '' });
   });
   cart = []; pdvCart(); $('pv-desc').value = 0; $('pv-ent').value = 0; guardar(); toast('Venda finalizada!');
 }
@@ -550,7 +562,7 @@ R.rateio = () => {
     const tot = ['<b>TOTAL</b>', '', `<b>${R$(T.liq)}</b>`, `<b>-${R$(T.ins)}</b>`, `<b>-${R$(T.cg)}</b>`, `<b>-${R$(T.mo)}</b>`, `<b>${R$(T.l)}</b>`, `<b>${R$(T.fundo)}</b>`, `<b>${R$(T.lu)}</b>`, `<b>${R$(T.bea)}</b>`];
     return tbl(['#', 'Data', 'Líquido', 'Insumo', 'Gerais (15%)', 'Mão de obra (23%)', 'Lucro', 'Fundo (12%)', 'Luyan (53%)', 'Beatriz (35%)'], L.length ? [tot, ...rows.slice(0, 80)] : [], 'Sem lançamentos.');
   };
-  $('rt-v').innerHTML = tab(ordenar(db.vendas).map(v => ['#' + v.num, v.data, num(v.liquido), qtdTotal(v) * num(v.custoUnd)]));
+  $('rt-v').innerHTML = tab(pedidosVarejo().map(p => ['#' + p.num, p.data, p.liq, p.ins]));
   $('rt-a').innerHTML = tab(ordenar(db.atacado.filter(a => a.status === 'PAGO')).map(a => ['#' + a.num, a.data, num(a.totalLiquido), insAt(a)]));
 };
 
@@ -661,6 +673,12 @@ function registrarLog(velho, forcar) {
     LOGC.forEach(c => {
       const A = new Map(arr(velho[c]).map(x => [x.id, x])), B = new Map(arr(db[c]).map(x => [x.id, x]));
       const derivado = x => (c === 'estoqueMov' || c === 'despesas') && x.ref;
+      if (c === 'vendas') {
+        const grupo = (lista, acao) => { if (!lista.length) return; const ns = [...new Set(lista.map(v => v.num))]; mk('vendas', acao, `Venda #${ns.join(', #')}: ${R$(lista.reduce((a, v) => a + num(v.liquido), 0))} (${lista.map(v => `${v.produto} ${v.qtd}x ${nomeSab(v)}`).join(' + ')})`, lista.length > 1 ? lista.map(v => v.id) : lista[0].id, acao === 'excluiu' ? (lista.length > 1 ? lista : lista[0]) : null); };
+        grupo([...B.values()].filter(r => !A.has(r.id)), 'criou'); grupo([...A.values()].filter(r => !B.has(r.id)), 'excluiu');
+        B.forEach((r, id) => { const o = A.get(id); if (o && JSON.stringify(o) !== JSON.stringify(r)) mk(c, 'editou', dLog(c, r), id, o, dLog(c, o)); });
+        return;
+      }
       B.forEach((r, id) => { if (derivado(r)) return; const o = A.get(id); if (!o) mk(c, 'criou', dLog(c, r), id); else if (JSON.stringify(o) !== JSON.stringify(r)) mk(c, 'editou', dLog(c, r), id, o, dLog(c, o)); });
       A.forEach((r, id) => { if (!B.has(id) && !derivado(r)) mk(c, 'excluiu', dLog(c, r), id, r); });
     });
@@ -672,9 +690,9 @@ function registrarLog(velho, forcar) {
 function desfazer(id) {
   const e = db.log.find(x => x.id === id); if (!e) return;
   if (!confirm(`Desfazer esta alteração?\n\n${e.desc}\n\nO lançamento volta ao estado de antes.`)) return;
-  const l = e.col, A = db[l];
-  if (e.acao === 'criou') { db[l] = A.filter(x => x.id !== e.rid); if (l === 'compras') { db.estoqueMov = db.estoqueMov.filter(x => x.ref !== e.rid); db.despesas = db.despesas.filter(x => x.ref !== e.rid); } }
-  else if (e.acao === 'excluiu') { if (A.some(x => x.id === e.rid)) return toast('Esse lançamento já existe de novo.', 1); db[l].push(e.antes); if (l === 'compras') SCH.compras.pos(e.antes, true); }
+  const l = e.col, A = db[l], ids = [].concat(e.rid), antes = e.antes ? [].concat(e.antes) : [];
+  if (e.acao === 'criou') { db[l] = A.filter(x => !ids.includes(x.id)); if (l === 'compras') { db.estoqueMov = db.estoqueMov.filter(x => !ids.includes(x.ref)); db.despesas = db.despesas.filter(x => !ids.includes(x.ref)); } }
+  else if (e.acao === 'excluiu') { if (antes.every(r => A.some(x => x.id === r.id))) return toast('Esse lançamento já existe de novo.', 1); antes.forEach(r => { if (!A.some(x => x.id === r.id)) { db[l].push(r); if (l === 'compras') SCH.compras.pos(r, true); } }); }
   else if (e.acao === 'editou') { const i = A.findIndex(x => x.id === e.rid); if (i < 0) return toast('Esse lançamento não existe mais.', 1); A[i] = e.antes; }
   e.desfeito = true; guardar(); toast('Alteração desfeita.');
 }
