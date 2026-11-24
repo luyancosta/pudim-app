@@ -29,7 +29,8 @@ const difDias = (a, b) => Math.round((new Date(b) - new Date(a)) / 864e5);
 const gp = (o, p) => p.split('.').reduce((a, k) => a && a[k], o);
 const sp = (o, p, v) => { const k = p.split('.'), l = k.pop(); k.reduce((a, x) => a[x], o)[l] = v; };
 const ordenar = a => [...a].sort((x, y) => (x.data || '') === (y.data || '') ? (y.id || 0) - (x.id || 0) : ((x.data || '') < (y.data || '') ? 1 : -1));
-const bt = (t, fn, c = '') => `<button class="b sm ${c.includes('v') ? '' : 'adm'} ${c}" onclick="${fn}">${t}</button>`;
+const AR = { '✏️': 'Editar', '🗑️': 'Excluir', '⚖️': 'Ajustar saldo' };
+const bt = (t, fn, c = '') => `<button class="b sm ${c.includes('v') ? '' : 'adm'} ${c}" onclick="${fn}" ${AR[t] ? `aria-label="${AR[t]}" title="${AR[t]}"` : ''}>${t}</button>`;
 const inp = (id, t, v = '', o = []) => t === 'select'
   ? `<select id="${id}">${o.map(x => `<option value="${x[0]}" ${String(x[0]) === String(v) ? 'selected' : ''}>${x[1]}</option>`).join('')}</select>`
   : `<input id="${id}" type="${t}" step="any" value="${v}">`;
@@ -41,11 +42,16 @@ const falha = m => { _trava = Date.now() + 2500; toast(m, 1); return false; };
 function ask(titulo, campos, cb) {
   $('m-t').textContent = titulo;
   $('m-b').innerHTML = campos.map(c => `<label>${c[1]}</label>${inp('m-' + c[0], c[2], c[3], c[4])}`).join('');
-  $('m-ok').hidden = false; $('m-x').textContent = 'Cancelar'; $('modal').hidden = false;
+  $('m-ok').hidden = false; $('m-x').textContent = 'Cancelar'; abrirModal();
   $('m-ok').onclick = () => { const v = {}; campos.forEach(c => v[c[0]] = $('m-' + c[0]).value); fechar(); cb(v); };
 }
-function info(t, h) { $('m-t').textContent = t; $('m-b').innerHTML = h; $('m-ok').hidden = true; $('m-x').textContent = 'Fechar'; $('modal').hidden = false; }
+function info(t, h) { $('m-t').textContent = t; $('m-b').innerHTML = h; $('m-ok').hidden = true; $('m-x').textContent = 'Fechar'; abrirModal(); }
 function fechar() { $('modal').hidden = true; }
+function abrirModal() { $('modal').hidden = false; ligaLabels(); const f = $('m-b').querySelector('input,select,textarea,a,button') || $('m-x'); f.focus(); }
+function ligaLabels() {
+  document.querySelectorAll('label:not([for])').forEach(l => { let n = l.nextElementSibling; for (let i = 0; i < 2 && n && !/^(INPUT|SELECT|TEXTAREA)$/.test(n.tagName); i++) { const c = n.querySelector && n.querySelector('input,select,textarea'); if (c) { n = c; break; } n = n.nextElementSibling; } if (n && /^(INPUT|SELECT|TEXTAREA)$/.test(n.tagName) && n.id) l.htmlFor = n.id; });
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('modal').hidden) fechar(); });
 
 /* ============ DADOS ============ */
 const SP = { tradicional: 'pudim', ninho: 'pudim_ninho', brigadeirao: 'pudim_brig' };
@@ -281,9 +287,17 @@ function excluir(l, id) {
 }
 const pg = {}, histOpen = {};
 const HT = { atacado: 'Histórico de pedidos de atacado', eventos: 'Eventos cadastrados', producoes: 'Histórico de produção', estoqueMov: 'Histórico de ajustes de estoque', despesas: 'Histórico de despesas', pagamentos: 'Histórico de saques', compras: 'Histórico de compras', vendas: 'Histórico de vendas (varejo)' };
+const HX = {}, hq = {};
+function histCorpo(l) {
+  const X = HX[l], q = (hq[l] || '').trim().toLowerCase(); let rows = X.todos.map(X.fn);
+  if (q) rows = rows.filter(r => r.join(' ').replace(/<[^>]*>/g, ' ').toLowerCase().includes(q));
+  const lim = pg[l] || 10, falta = rows.length - lim;
+  return tbl(X.h, rows.slice(0, lim), q ? 'Nada encontrado para essa busca.' : X.vz) + (falta > 0 ? `<div class="row mais"><button class="b" onclick="verMais('${l}')">Ver mais ${Math.min(10, falta)} (restam ${falta})</button></div>` : '');
+}
+function histBusca(l, v) { hq[l] = v; pg[l] = 10; $('hb-' + l).innerHTML = histCorpo(l); }
 function hist(l, h, todos, fn, vz) {
-  const lim = pg[l] || 10, n = todos.length, falta = n - lim, aberto = histOpen[l] ?? !['estoqueMov', 'producoes'].includes(l);
-  return `<details class="hist" ${aberto ? 'open' : ''} ontoggle="histOpen['${l}']=this.open"><summary><span>${HT[l]}</span><b>${n}</b></summary>${tbl(h, todos.slice(0, lim).map(fn), vz)}${falta > 0 ? `<div class="row mais"><button class="b" onclick="verMais('${l}')">Ver mais ${Math.min(10, falta)} (restam ${falta})</button></div>` : ''}</details>`;
+  HX[l] = { h, todos, fn, vz }; const aberto = histOpen[l] ?? !['estoqueMov', 'producoes'].includes(l);
+  return `<details class="hist" ${aberto ? 'open' : ''} ontoggle="histOpen['${l}']=this.open"><summary><span>${HT[l]}</span><b>${todos.length}</b></summary><div class="hbusca"><input type="search" id="hq-${l}" value="${(hq[l] || '').replace(/"/g, '&quot;')}" placeholder="Buscar neste histórico" aria-label="Buscar em ${HT[l]}" oninput="histBusca('${l}',this.value)"></div><div id="hb-${l}">${histCorpo(l)}</div></details>`;
 }
 const verMais = l => { pg[l] = (pg[l] || 10) + 10; updateAll(); };
 function rLista(l) {
@@ -294,7 +308,7 @@ const lista = l => `<div class="adm" id="form-${l}"></div><div id="lista-${l}"><
 
 /* ============ HTML DAS ABAS ============ */
 const H = {
-  dashboard: () => `<div id="aviso-setup"></div><div class="card row" style="margin-top:0"><label style="margin:0">Mês:</label><input type="month" id="dash-mes" style="width:170px" onchange="rDash()"><button class="b" onclick="$('dash-mes').value='';rDash()">Todos</button></div><div id="dash-body"></div>`,
+  dashboard: () => `<div id="aviso-setup"></div><div class="card row" style="margin-top:0"><label style="margin:0">Mês:</label><input type="month" id="dash-mes" style="width:170px" onchange="rDash()"><button class="b" onclick="$('dash-mes').value='';rDash()">Todos</button></div><div id="dash-body"><div class="skel"></div><div class="skel s2"></div></div>`,
   contagem: () => `<div id="cont-body"></div>`,
   vendas: () => `<div class="card adm"><h3>1. Montar pedido</h3><div id="pv-evinfo"></div><div class="fg"><div><label>Evento</label><select id="pv-ev" onchange="pdvEv()"><option value="">Venda normal (varejo)</option></select></div>
     <div><label>Produto</label><select id="pv-prod" onchange="pdvTog()"><option>Unidade</option><option>Combo</option></select></div>
@@ -608,7 +622,7 @@ function cfgSabores() {
   const rows = db.sabores.map(x => { const a = ativo(SP[x.id]); return [`<b>${x.nome}</b>`, x.rende, R$(custo(x.id, 'atacado')), R$(custo(x.id, 'varejo')), x.adic ? '+' + R$(x.adic) : '-', Object.entries(x.ins || {}).map(([k, q]) => `${r2(q)} ${ITENS[k] ? ITENS[k][1] : ''} ${ITENS[k] ? ITENS[k][0] : k}`).join(', '), `<span class="tag ${a ? 'ok' : 'no'}">${a ? 'Ativo' : 'Inativo'}</span>`, bt('✏️ Editar', `editSabor('${x.id}')`) + bt(a ? 'Inativar' : 'Ativar', `toggleInativo('${SP[x.id]}')`)]; });
   return `<div class="card"><h3>Sabores</h3>${tbl(['Sabor', 'Rende', 'Custo atac.', 'Custo var.', 'Adic. combo', 'Ingredientes por receita', 'Status', 'Ações'], rows)}
   <h4 id="sb-tit">Novo sabor</h4><div class="fg"><div><label>Nome do sabor</label><input id="sb-nome"></div><div><label>Pudins por receita</label><input id="sb-rende" type="number"></div><div><label>Adicional no combo (R$)</label><input id="sb-adic" type="number" step="any"></div><div><label>Custo insumo atacado (R$/un) — vazio = calcular pela ficha</label><input id="sb-ca" type="number" step="any"></div><div><label>Custo insumo varejo (R$/un) — vazio = calcular pela ficha</label><input id="sb-cv" type="number" step="any"></div></div>
-  <label>Ingredientes por receita (copo, tampa e adesivo baixam sozinhos). Atenção: mudar a receita recalcula o estoque das produções já lançadas.</label><div id="sb-ing"></div><div class="row"><button class="b sm" onclick="addIng()">+ Ingrediente</button><button class="b pri" onclick="salvarSabor()">Salvar sabor</button><button class="b" onclick="sbEdit=null;sbForm()">Limpar / cancelar edição</button></div></div>`;
+  <div class="lbl">Ingredientes por receita (copo, tampa e adesivo baixam sozinhos). Atenção: mudar a receita recalcula o estoque das produções já lançadas.</div><div id="sb-ing"></div><div class="row"><button class="b sm" onclick="addIng()">+ Ingrediente</button><button class="b pri" onclick="salvarSabor()">Salvar sabor</button><button class="b" onclick="sbEdit=null;sbForm()">Limpar / cancelar edição</button></div></div>`;
 }
 function sbForm() {
   if (!$('sb-nome')) return; const x = sbEdit ? db.sabores.find(y => y.id === sbEdit) : null;
@@ -770,16 +784,19 @@ function salvarLegado() { ['varejo', 'atacado'].forEach(c => LGK.forEach(([k]) =
 
 /* ============ NAVEGAÇÃO / INICIALIZAÇÃO ============ */
 const visiveis = () => TABS.filter(t => role === 'admin' || (t[0] !== 'config' && db.config.abasViewer[t[0]]));
+const NAVG = [['Visão geral', ['dashboard']], ['Vendas', ['vendas', 'atacado', 'receber', 'clientes', 'eventos']], ['Produção e compras', ['estoque', 'compras', 'precos']], ['Financeiro', ['despesas', 'saques', 'rateio', 'contagem', 'fechamento']], ['Sistema', ['log', 'config']]];
 function buildNav() {
-  $('nav').innerHTML = visiveis().map(t => `<button id="nv-${t[0]}" onclick="switchTab('${t[0]}')">${t[1]} ${t[2]}${t[0] === 'dashboard' ? '<span id="bdg"></span>' : ''}</button>`).join('');
-  const a = document.querySelector('.tab.on'); if (a && $('nv-' + a.id.slice(4))) $('nv-' + a.id.slice(4)).classList.add('on');
+  const vis = visiveis(), tem = id => vis.find(t => t[0] === id);
+  $('nav').innerHTML = NAVG.map(([g, ids]) => { const it = ids.map(tem).filter(Boolean); return it.length ? `<div class="ng">${g}</div>` + it.map(t => `<button id="nv-${t[0]}" title="${t[2]}" onclick="switchTab('${t[0]}')"><span class="ic" aria-hidden="true">${t[1]}</span><span class="nt">${t[2]}</span>${t[0] === 'dashboard' ? '<span id="bdg"></span>' : ''}</button>`).join('') : ''; }).join('');
+  const a = document.querySelector('.tab.on'); if (a && $('nv-' + a.id.slice(4))) { $('nv-' + a.id.slice(4)).classList.add('on'); $('nv-' + a.id.slice(4)).setAttribute('aria-current', 'page'); }
 }
+function toggleSide() { const m = document.body.classList.toggle('side-mini'); try { localStorage.setItem('sideMini', m ? '1' : ''); } catch (e) { } $('colapsa').setAttribute('aria-expanded', !m); $('colapsa').title = m ? 'Expandir menu' : 'Recolher menu'; }
 function switchTab(id) {
   document.querySelectorAll('.tab').forEach(e => e.classList.remove('on')); document.querySelectorAll('#nav button').forEach(e => e.classList.remove('on'));
-  $('tab-' + id).classList.add('on'); const b = $('nv-' + id); if (b) b.classList.add('on'); $('titulo').textContent = TABS.find(t => t[0] === id)[2];
+  $('tab-' + id).classList.add('on'); const b = $('nv-' + id); document.querySelectorAll('#nav button').forEach(e => e.removeAttribute('aria-current')); if (b) { b.classList.add('on'); b.setAttribute('aria-current', 'page'); } $('titulo').textContent = TABS.find(t => t[0] === id)[2]; $('crumb').textContent = (NAVG.find(g => g[1].includes(id)) || [''])[0]; window.scrollTo(0, 0);
   $('side').classList.remove('open'); if (id === 'config') rConfig(); localStorage.setItem('pudimTab', id); updateAll();
 }
-function updateAll() {
+function updateAll() { setTimeout(ligaLabels, 0);
   aplicarCustom(); refreshSel(); bnavSync();
   if (!$('bdg')) buildNav(); else if (visiveis().length !== $('nav').children.length) { buildNav(); }
   const ativa = document.querySelector('.tab.on'); if (!ativa) return;
@@ -812,4 +829,5 @@ function iniciar() {
     }, er => { $('sync').classList.add('off'); toast('Sem leitura da nuvem: ' + er.code, 1); });
   });
 }
+try { if (localStorage.getItem('sideMini')) document.body.classList.add('side-mini'); } catch (e) { }
 iniciar();
