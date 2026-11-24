@@ -1,0 +1,70 @@
+/* ==========================================================================
+   Design System — Pudim Du Cariri
+   Camada sobre o style.css: tokens, acessibilidade e componentes padronizados.
+   Mudou um token aqui, mudou o app inteiro.
+   ========================================================================== */
+:root{
+  /* cor (textos e estados ajustados para contraste WCAG AA) */
+  --mu:#7A5A44;--ok:#46662B;--red:#A53A25;--info:#2F5D8A;--focus:#1F4FB4;
+  /* espaçamento (escala de 4px) */
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;
+  /* raios e sombras */
+  --r-sm:8px;--r-md:12px;--r-lg:16px;
+  --sh1:0 1px 2px rgba(46,23,12,.06);--sh2:0 10px 30px rgba(46,23,12,.14);
+  /* tipografia */
+  --fs-xs:.75rem;--fs-sm:.8125rem;--fs-md:.9375rem;--fs-lg:1.125rem;--fs-num:1.5rem;
+  /* componentes */
+  --h-btn:40px;--h-in:44px;--ease:cubic-bezier(.2,.7,.2,1);--w-max:1240px;
+}
+/* acessibilidade */
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.skip{position:absolute;left:-999px;top:8px;z-index:2000;background:var(--deep);color:#fff;padding:10px 14px;border-radius:var(--r-sm)}
+.skip:focus{left:8px}
+::placeholder{color:var(--mu);opacity:1}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+/* texto secundário com contraste suficiente */
+.k small,label,.lbl,.hsub,.lh small,.ai small,.lo,.imp small{color:var(--mu);opacity:1}
+.k.big small{color:var(--mu)}
+/* superfícies */
+.card,.k,.tw,details.sec,details.fd,details.hist,.le{box-shadow:var(--sh1);border-radius:var(--r-lg)}
+.tab{max-width:var(--w-max)}
+/* botões, campos */
+.b{min-height:var(--h-btn);transition:background .15s var(--ease),transform .08s var(--ease),border-color .15s}
+.b:active{transform:scale(.97)}.b:disabled{opacity:.5;cursor:not-allowed}
+input,select{min-height:var(--h-in);border-radius:var(--r-md)}
+input[type=checkbox]{min-height:0;width:22px;height:22px}
+.lbl{display:block;font-size:.74rem;font-weight:700;margin:9px 0 4px}
+.chip{min-height:40px;transition:border-color .15s}.chip:hover{border-color:var(--gold)}
+/* cabeçalho com breadcrumb real (grupo do menu / página) */
+.hd{min-width:0}.hd small{display:block;font-size:var(--fs-xs);font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mu)}
+header h2{line-height:1.1}
+/* menu lateral agrupado e recolhível */
+.ng{font-size:.68rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:#C9A98A;padding:14px 12px 4px}
+.ic{width:24px;text-align:center;flex:none}
+.side-toggle{margin:var(--s2) 10px;background:none;border:1px solid #4A2816;color:#E8D3BE;border-radius:10px;padding:10px 12px;cursor:pointer;font-weight:700;font-size:.8rem;display:flex;gap:10px;align-items:center}
+.side-toggle:hover{background:#4A2816}
+#nav button:focus-visible,.side-toggle:focus-visible{outline-color:#FFD58A}
+@media(min-width:901px){
+  body.side-mini{--w:76px}
+  body.side-mini .nt,body.side-mini .ng,body.side-mini .user,body.side-mini #bdg{display:none}
+  body.side-mini #nav button,body.side-mini .side-toggle{justify-content:center;padding-left:0;padding-right:0}
+  body.side-mini .brand{padding:12px 8px}body.side-mini .brand img{padding:4px}
+  body.side-mini #colapsa .ic{transform:rotate(180deg)}
+}
+@media(max-width:900px){.side-toggle{display:none}.hd small{display:none}}
+/* estados: vazio e carregando */
+.vz{padding:28px 16px;font-weight:600;color:var(--mu)}
+.vz::before{content:'🍮';display:block;font-size:1.6rem;margin-bottom:6px}
+.skel{height:120px;border-radius:var(--r-lg);margin-bottom:var(--s3);background:linear-gradient(90deg,#F5E4C6 25%,#FFF3DC 50%,#F5E4C6 75%);background-size:200% 100%;animation:sk 1.4s linear infinite}
+.skel.s2{height:220px}@keyframes sk{to{background-position:-200% 0}}
+/* busca nos históricos */
+.hbusca{padding:var(--s3) 14px 0}.hbusca input{min-height:40px}
+/* modal */
+.mx{box-shadow:var(--sh2);animation:pop .18s var(--ease)}@keyframes pop{from{opacity:0;transform:translateY(8px)}}
+/* toque confortável no celular */
+@media(max-width:900px){.b{min-height:44px}.b.sm{min-height:40px}#bnav button{min-height:56px}}
+@media(max-width:900px){.chip{min-height:44px}}
+/* menu lateral mais compacto: cabem mais itens sem rolar */
+.brand{padding:12px 16px 4px}.brand img{width:64%;display:block;margin:0 auto;padding:6px 10px}
+#nav button{padding:8px 12px}.ng{padding:10px 12px 3px}
+@media(min-width:901px) and (min-height:1000px){#nav button{padding:10px 12px}}
