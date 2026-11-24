@@ -136,18 +136,31 @@ const qtdTotal = v => unid(v).reduce((a, x) => a + x[1], 0);
 const nomeSab = v => { if (comboOk(v)) { const c = {}; v.saboresCombo.forEach(s => c[s] = (c[s] || 0) + 1); return Object.entries(c).map(([s, n]) => `${n}x ${NS[s]}`).join(' + '); } return NS[v.sabor] || 'Tradicional'; };
 const rateio = b => { const cg = b * .15, mo = b * .23, l = b - cg - mo; return { cg, mo, l, fundo: l * .12, bea: l * .35, lu: l * .53 }; };
 
+/* Pudins EXTRAS (rendeu mais que o esperado) não gastam ingrediente: nas vendas seguintes, os primeiros
+   pudins vendidos de cada sabor ficam mais baratos (só embalagem), e o rateio é refeito com esse custo menor. */
+const ingUnd = s => { const x = db.sabores.find(y => y.id === s) || REC[s]; if (!x || !num(x.rende)) return 0; let r = 0; for (const k in (x.ins || {})) r += num(x.ins[k]) * costBase(k); return r / num(x.rende); };
+function economiaExtras() {
+  const M = new Map(), ex = db.producoes.filter(p => num(p.extra) > 0); if (!ex.length) return M;
+  const ev = [], pool = {};
+  ex.forEach(p => ev.push({ d: p.data || '', id: p.id, t: 0, sab: p.sabor, n: num(p.extra) }));
+  db.vendas.forEach(v => unid(v).forEach(([s, n]) => ev.push({ d: v.data || '', id: v.id, t: 1, sab: s, n, k: 'v:' + v.id })));
+  db.atacado.forEach(a => atItens(a).forEach(i => ev.push({ d: a.data || '', id: a.id, t: 1, sab: i.sabor, n: num(i.qtd), k: 'a:' + a.id })));
+  ev.sort((a, b) => a.d === b.d ? (a.t - b.t || a.id - b.id) : (a.d < b.d ? -1 : 1));
+  ev.forEach(e => { if (e.t === 0) pool[e.sab] = (pool[e.sab] || 0) + e.n; else { const t = Math.min(pool[e.sab] || 0, e.n); if (t > 0) { pool[e.sab] -= t; M.set(e.k, (M.get(e.k) || 0) + t * ingUnd(e.sab)); } } });
+  return M;
+}
 /* Atacado só entra nos números quando PAGO (mas conta no mês do pedido). */
 function linhasFin() {
-  const L = [];
-  db.vendas.forEach(v => { const q = qtdTotal(v), ins = q * num(v.custoUnd), liq = num(v.liquido); L.push({ canal: v.evento ? 'evento' : 'varejo', ev: v.evento || '', data: v.data || '', q, bruto: num(v.bruto), liq, ins, ...rateio(liq - ins), sab: unid(v) }); });
-  db.atacado.filter(a => a.status === 'PAGO').forEach(a => { const ins = insAt(a), liq = num(a.totalLiquido); L.push({ canal: 'atacado', data: a.data || '', q: num(a.qtd), bruto: num(a.totalBruto), liq, ins, ...rateio(liq - ins), sab: atItens(a).map(i => [i.sabor, num(i.qtd)]) }); });
+  const L = [], M = economiaExtras();
+  db.vendas.forEach(v => { const q = qtdTotal(v), ins = Math.max(0, q * num(v.custoUnd) - (M.get('v:' + v.id) || 0)), liq = num(v.liquido); L.push({ canal: v.evento ? 'evento' : 'varejo', ev: v.evento || '', data: v.data || '', q, bruto: num(v.bruto), liq, ins, ...rateio(liq - ins), sab: unid(v) }); });
+  db.atacado.filter(a => a.status === 'PAGO').forEach(a => { const ins = Math.max(0, insAt(a) - (M.get('a:' + a.id) || 0)), liq = num(a.totalLiquido); L.push({ canal: 'atacado', data: a.data || '', q: num(a.qtd), bruto: num(a.totalBruto), liq, ins, ...rateio(liq - ins), sab: atItens(a).map(i => [i.sabor, num(i.qtd)]) }); });
   return L;
 }
 function saldos() {
   const s = {}; Object.keys(ITENS).forEach(k => s[k] = 0);
   db.estoqueMov.forEach(m => { if (s[m.item] !== undefined) s[m.item] += m.tipo === 'entrada' ? num(m.qtd) : -num(m.qtd); });
   // Insumos baixam SOMENTE na receita; a receita já cria o pudim pronto.
-  db.producoes.forEach(p => { const r = REC[p.sabor] || REC.tradicional, q = num(p.qtd); s[r.prod] += q * r.rende; for (const k in r.ins) s[k] -= q * r.ins[k]; ['copo', 'tampa', 'adesivo'].forEach(k => s[k] -= q * r.rende); });
+  db.producoes.forEach(p => { const r = REC[p.sabor] || REC.tradicional, q = num(p.qtd); const ex = num(p.extra); s[r.prod] += q * r.rende + ex; for (const k in r.ins) s[k] -= q * r.ins[k]; ['copo', 'tampa', 'adesivo'].forEach(k => s[k] -= q * r.rende + ex); });
   // Venda baixa o pudim pronto, a colher e a sacola (nunca os insumos de novo).
   db.vendas.forEach(v => { unid(v).forEach(([sb, q]) => s[SP[sb] || 'pudim'] -= q); s.colher -= qtdTotal(v); if (v.evento) { const e = db.eventos.find(x => x.id === v.evento); if (e && e.itemEmb && s[e.itemEmb] !== undefined) s[e.itemEmb] -= num(e.embQtd) * qtdTotal(v); } if (v.sacTipo && v.sacTipo !== 'nenhuma') s[v.sacTipo] -= num(v.sacQtd); });
   db.atacado.forEach(a => { atItens(a).forEach(i => s[SP[i.sabor] || 'pudim'] -= num(i.qtd)); s.copo += num(a.copos); });
@@ -218,7 +231,8 @@ const SCH = {
     msg: n => { const [k, nome] = CXD[catDesp(n)], c = caixas(); return `Despesa de ${R$(n.total)} descontada de ${nome} (saldo ${R$(c[k])}). Total em conta: ${R$(c.total)}`; }
   },
   pagamentos: { t: 'Saque', f: [['data', 'Data', 'date'], ['tipo', 'Caixinha', 'select', [['MaoObra', 'Mão de obra'], ['Luyan', 'Luyan'], ['Beatriz', 'Beatriz']]], ['valor', 'Valor (R$)', 'number'], ['obs', 'Observação', 'text']], h: ['Data', 'Caixinha', 'Valor', 'Obs.'], r: p => [fdata(p.data), p.tipo, '-' + R$(p.valor), p.obs || '-'], pre: o => { o.valor = num(o.valor); if (!o.valor) { toast('Informe o valor.', 1); return false; } } },
-  producoes: { t: 'Produção (bater receita)', f: [['data', 'Data', 'date'], ['sabor', 'Sabor', 'select', optSab], ['qtd', 'Nº de receitas', 'number', null, 1]], h: ['Data', 'Sabor', 'Receitas', 'Pudins'], r: p => [fdata(p.data), NS[p.sabor] || p.sabor, p.qtd, p.qtd * ((REC[p.sabor] || {}).rende || 0)], pre: o => { o.qtd = num(o.qtd); if (!o.qtd) { toast('Informe a quantidade.', 1); return false; } } },
+  producoes: { t: 'Produção (bater receita)', f: [['data', 'Data', 'date'], ['sabor', 'Sabor', 'select', optSab], ['qtd', 'Nº de receitas', 'number', null, 1], ['extra', 'Pudins a mais (extras além do esperado)', 'number', null, 0]], h: ['Data', 'Sabor', 'Receitas', 'Pudins'], r: p => { const t = num(p.qtd) * ((REC[p.sabor] || {}).rende || 0), e = num(p.extra); return [fdata(p.data), NS[p.sabor] || p.sabor, p.qtd, e > 0 ? `${t + e} <span class="tag ok">+${e} extra</span>` : t]; }, pre: o => { o.qtd = num(o.qtd); o.extra = Math.max(0, Math.round(num(o.extra))); if (!o.qtd) { toast('Informe a quantidade.', 1); return false; } },
+    msg: n => { const t = n.qtd * ((REC[n.sabor] || {}).rende || 0); return n.extra > 0 ? `Produção salva: ${t + n.extra} pudins (${t} + ${n.extra} extras). Os extras custam só a embalagem no rateio.` : 'Salvo!'; } },
   estoqueMov: {
     t: 'Ajuste manual / perda', f: [['data', 'Data', 'date'], ['item', 'Item', 'select', optIt], ['tipo', 'Tipo', 'select', [['entrada', 'Entrada (+)'], ['saida', 'Saída (−)'], ['perda', 'Perda / quebra']]], ['qtd', 'Quantidade', 'number'], ['desc', 'Motivo', 'text']],
     h: ['Data', 'Item', 'Mov.', 'Motivo'], r: m => [fdata(m.data), ITENS[m.item] ? ITENS[m.item][0] : m.item, `<b class="${m.tipo === 'entrada' ? '' : 'neg'}">${m.tipo === 'entrada' ? '+' : '−'}${r2(m.qtd)}</b>`, m.desc || '-'],
@@ -367,12 +381,12 @@ R.contagem = () => {
   $('cont-body').innerHTML = `<div class="card">Atacado conta no <b>mês do pedido</b>, mas só aparece aqui depois de marcado como <b>pago</b>.</div>` + tbl(['Mês', 'Tradicional', 'Ninho', 'Brigadeirão', 'Outros sabores', 'Total vendido', 'Fat. bruto', 'Fat. líquido', 'Lucro líquido', 'Despesas'], Object.keys(M).sort().reverse().map(k => { const o = M[k], [y, mm] = k.split('-'); return [mm ? `<b>${mn[mm - 1]}/${y}</b>` : k, o.t, o.n, o.b, o.x, `<b>${o.q} un</b>`, R$(o.br), R$(o.lq), `<b style="color:var(--ok)">${R$(o.l)}</b>`, `<span class="neg">${R$(o.d)}</span>`]; }));
 };
 function pedidosVarejo() {
-  const out = []; let ult = null;
+  const out = [], M = economiaExtras(); let ult = null;
   ordenar(db.vendas).forEach(v => {
     const mesmo = ult && (v.pedido && ult.pedido ? v.pedido === ult.pedido : (!v.pedido && !ult.pedido && v.data === ult.data && v.pgto === ult.pgto && (v.evento || '') === (ult.evento || '') && Math.abs(v.id - ult.id) < 5000));
     if (mesmo) out[out.length - 1].push(v); else out.push([v]); ult = v;
   });
-  return out.map(it => { it.sort((a, b) => a.id - b.id); const ns = it.map(v => v.num), mn = Math.min(...ns), mx = Math.max(...ns); return { itens: it, ids: it.map(v => v.id), num: mn === mx ? '' + mn : mn + '–' + mx, data: it[0].data, pgto: it[0].pgto, evento: it[0].evento, liq: it.reduce((a, v) => a + num(v.liquido), 0), ins: it.reduce((a, v) => a + qtdTotal(v) * num(v.custoUnd), 0) }; });
+  return out.map(it => { it.sort((a, b) => a.id - b.id); const ns = it.map(v => v.num), mn = Math.min(...ns), mx = Math.max(...ns); return { itens: it, ids: it.map(v => v.id), num: mn === mx ? '' + mn : mn + '–' + mx, data: it[0].data, pgto: it[0].pgto, evento: it[0].evento, liq: it.reduce((a, v) => a + num(v.liquido), 0), ins: it.reduce((a, v) => a + Math.max(0, qtdTotal(v) * num(v.custoUnd) - (M.get('v:' + v.id) || 0)), 0) }; });
 }
 function excluirVarejo(ids) {
   if (!confirm(ids.length > 1 ? `Excluir este pedido inteiro (${ids.length} itens)? Os saldos serão recalculados.` : 'Excluir este registro? Os saldos serão recalculados.')) return;
@@ -563,7 +577,7 @@ R.rateio = () => {
     return tbl(['#', 'Data', 'Líquido', 'Insumo', 'Gerais (15%)', 'Mão de obra (23%)', 'Lucro', 'Fundo (12%)', 'Luyan (53%)', 'Beatriz (35%)'], L.length ? [tot, ...rows.slice(0, 80)] : [], 'Sem lançamentos.');
   };
   $('rt-v').innerHTML = tab(pedidosVarejo().map(p => ['#' + p.num, p.data, p.liq, p.ins]));
-  $('rt-a').innerHTML = tab(ordenar(db.atacado.filter(a => a.status === 'PAGO')).map(a => ['#' + a.num, a.data, num(a.totalLiquido), insAt(a)]));
+  { const M = economiaExtras(); $('rt-a').innerHTML = tab(ordenar(db.atacado.filter(a => a.status === 'PAGO')).map(a => ['#' + a.num, a.data, num(a.totalLiquido), Math.max(0, insAt(a) - (M.get('a:' + a.id) || 0))])); }
 };
 
 /* ============ FICHA TÉCNICA, SABORES, ITENS, EVENTOS ============ */
@@ -654,7 +668,7 @@ function dLog(c, r) {
       case 'despesas': return `Despesa "${r.item}": ${R$(dtot(r))} (${r.categoria})`;
       case 'pagamentos': return `Saque de ${R$(r.valor)} (${r.tipo})`;
       case 'ajustes': return `Ajuste em ${CXN[r.caixa] || r.caixa}: ${R$(r.valor)}`;
-      case 'producoes': return `Produção: ${r.qtd} receita(s) de ${NS[r.sabor] || r.sabor}`;
+      case 'producoes': return `Produção: ${r.qtd} receita(s) de ${NS[r.sabor] || r.sabor}${num(r.extra) > 0 ? ` (+${r.extra} pudins extras)` : ''}`;
       case 'estoqueMov': return `Estoque ${IT(r.item)[0]}: ${r.tipo === 'entrada' ? '+' : '−'}${r2(r.qtd)} ${r.desc || ''}`;
       case 'compras': return `Compra de ${IT(r.item)[0]}: ${R$(r.valor)}`;
       case 'fechamentos': return `Fechamento de ${mesTxt(r.mes)}`;
