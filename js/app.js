@@ -34,7 +34,7 @@ const bt = (t, fn, c = '') => `<button class="b sm ${c.includes('v') ? '' : 'adm
 const inp = (id, t, v = '', o = []) => t === 'select'
   ? `<select id="${id}">${o.map(x => `<option value="${x[0]}" ${String(x[0]) === String(v) ? 'selected' : ''}>${x[1]}</option>`).join('')}</select>`
   : `<input id="${id}" type="${t}" step="any" value="${v}">`;
-const tbl = (h, r, vz = 'Nada por aqui ainda.') => `<div class="tw"><table><thead><tr>${h.map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${r.length ? r.map(x => `<tr>${x.map((c, i) => `<td data-label="${h[i] || ''}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td class="vz" colspan="${h.length}">${vz}</td></tr>`}</tbody></table></div>`;
+const tbl = (h, r, vz = 'Nada por aqui ainda.', thf) => `<div class="tw"><table><thead><tr>${h.map((x, i) => `<th>${thf ? thf(i, x) : x}</th>`).join('')}</tr></thead><tbody>${r.length ? r.map(x => `<tr>${x.map((c, i) => `<td data-label="${h[i] || ''}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td class="vz" colspan="${h.length}">${vz}</td></tr>`}</tbody></table></div>`;
 const kpi = (t, v, cl = '') => `<div class="k ${cl}"><small>${t}</small><b>${v}</b></div>`;
 let _trava = 0;
 function toast(m, err) { if (!err && Date.now() < _trava) return; const t = $('toast'); t.textContent = m; t.className = 'on' + (err ? ' err' : ''); clearTimeout(t._t); t._t = setTimeout(() => t.className = '', err ? 6500 : (m.length > 60 ? 5500 : 3200)); }
@@ -213,7 +213,7 @@ const SCH = {
     f: [['data', 'Data do pedido', 'date'], ['clienteId', 'Cliente', 'select', optCli], ['copos', 'Copos devolvidos', 'number', null, 0], ['desconto', 'Desconto logística (vazio = automático)', 'number'], ['status', 'Status', 'select', [['NÃO PAGO', 'Pendente'], ['PAGO', 'Pago']]], ['venc', 'Vencimento (opcional)', 'date', null, '']],
     h: ['#', 'Data', 'Cliente', 'Sabores', 'Qtd', 'Líquido', 'Status'],
     r: a => ['#' + a.num, fdata(a.data), a.cliente, resumoAt(a), a.qtd, R$(a.totalLiquido), `<span class="tag ${a.status === 'PAGO' ? 'ok' : 'no'}">${a.status === 'PAGO' ? 'Pago' : (atrasado(a) ? 'Atrasado' : 'Pendente')}</span>`],
-    ex: a => bt('📄 Recibo', `reciboPedido(${a.id})`, 'v') + (a.status !== 'PAGO' ? bt('💰 Receber', `receber(${a.id})`, 'ok') : ''),
+    ex: a => a.status === 'PAGO' ? bt('📄 Recibo', `reciboPedido(${a.id})`, 'v') : bt('📤 Cobrar', `cobrar(${a.clienteId})`, 'v') + bt('💰 Receber', `receber(${a.id})`, 'ok'),
     pre: o => {
       const c = db.clientes.find(x => x.id == o.clienteId); if (!c) { toast('Cadastre e escolha um cliente.', 1); return false; }
       o.itens = lerItens(); if (!o.itens.length) { toast('Adicione ao menos um sabor com quantidade e valor.', 1); return false; }
@@ -287,17 +287,23 @@ function excluir(l, id) {
 }
 const pg = {}, histOpen = {};
 const HT = { atacado: 'Histórico de pedidos de atacado', eventos: 'Eventos cadastrados', producoes: 'Histórico de produção', estoqueMov: 'Histórico de ajustes de estoque', despesas: 'Histórico de despesas', pagamentos: 'Histórico de saques', compras: 'Histórico de compras', vendas: 'Histórico de vendas (varejo)' };
-const HX = {}, hq = {};
+const HX = {}, hq = {}, hs = {};
 function histCorpo(l) {
-  const X = HX[l], q = (hq[l] || '').trim().toLowerCase(); let rows = X.todos.map(X.fn);
+  const X = HX[l], q = (hq[l] || '').trim().toLowerCase(), S = hs[l] || { c: -1, d: 1 }; let rows = X.todos.map(X.fn);
   if (q) rows = rows.filter(r => r.join(' ').replace(/<[^>]*>/g, ' ').toLowerCase().includes(q));
+  if (S.c >= 0) rows.sort((a, b) => S.d * cmp(a[S.c], b[S.c]));
   const lim = pg[l] || 10, falta = rows.length - lim;
-  return tbl(X.h, rows.slice(0, lim), q ? 'Nada encontrado para essa busca.' : X.vz) + (falta > 0 ? `<div class="row mais"><button class="b" onclick="verMais('${l}')">Ver mais ${Math.min(10, falta)} (restam ${falta})</button></div>` : '');
+  const thf = (i, x) => x && x !== 'Ações' ? `<button class="th-s" onclick="histSort('${l}',${i})" aria-label="Ordenar por ${x}">${x}${S.c === i ? (S.d > 0 ? ' ▲' : ' ▼') : ''}</button>` : x;
+  return tbl(X.h, rows.slice(0, lim), q ? 'Nada encontrado para essa busca.' : X.vz, thf) + (falta > 0 ? `<div class="row mais"><button class="b" onclick="verMais('${l}')">Ver mais ${Math.min(10, falta)} (restam ${falta})</button></div>` : '');
 }
-function histBusca(l, v) { hq[l] = v; pg[l] = 10; $('hb-' + l).innerHTML = histCorpo(l); }
+function histRender(l) { pg[l] = 10; $('hb-' + l).innerHTML = histCorpo(l); const s = $('hs-' + l); if (s) s.value = (hs[l] || { c: -1 }).c; }
+function histBusca(l, v) { hq[l] = v; histRender(l); }
+function histSort(l, c) { const S = hs[l] || (hs[l] = { c: -1, d: 1 }); c = +c; if (S.c === c) S.d = -S.d; else { S.c = c; S.d = 1; } histRender(l); }
+function histCol(l, c) { hs[l] = { c: +c, d: 1 }; histRender(l); }
+function histDir(l) { const S = hs[l]; if (S && S.c >= 0) { S.d = -S.d; histRender(l); } }
 function hist(l, h, todos, fn, vz) {
-  HX[l] = { h, todos, fn, vz }; const aberto = histOpen[l] ?? !['estoqueMov', 'producoes'].includes(l);
-  return `<details class="hist" ${aberto ? 'open' : ''} ontoggle="histOpen['${l}']=this.open"><summary><span>${HT[l]}</span><b>${todos.length}</b></summary><div class="hbusca"><input type="search" id="hq-${l}" value="${(hq[l] || '').replace(/"/g, '&quot;')}" placeholder="Buscar neste histórico" aria-label="Buscar em ${HT[l]}" oninput="histBusca('${l}',this.value)"></div><div id="hb-${l}">${histCorpo(l)}</div></details>`;
+  HX[l] = { h, todos, fn, vz }; const aberto = histOpen[l] ?? !['estoqueMov', 'producoes'].includes(l), S = hs[l] || { c: -1 };
+  return `<details class="hist" ${aberto ? 'open' : ''} ontoggle="histOpen['${l}']=this.open"><summary><span>${HT[l]}</span><b>${todos.length}</b></summary><div class="hbusca"><input type="search" id="hq-${l}" value="${(hq[l] || '').replace(/"/g, '&quot;')}" placeholder="Buscar neste histórico" aria-label="Buscar em ${HT[l]}" oninput="histBusca('${l}',this.value)"><select id="hs-${l}" aria-label="Ordenar por" onchange="histCol('${l}',this.value)"><option value="-1">Ordem padrão</option>${h.map((x, i) => x && x !== 'Ações' ? `<option value="${i}" ${S.c === i ? 'selected' : ''}>${x}</option>` : '').join('')}</select><button class="b sm" aria-label="Inverter ordem" onclick="histDir('${l}')">↕</button></div><div id="hb-${l}">${histCorpo(l)}</div></details>`;
 }
 const verMais = l => { pg[l] = (pg[l] || 10) + 10; updateAll(); };
 function rLista(l) {
@@ -370,23 +376,43 @@ function rDash0() {
   ${chips ? `<div class="chips">${chips}</div>` : ''}
   <div class="grid"><div class="k big ${c.total < -0.004 ? 'neg' : ''}"><small>Dinheiro total disponível em conta</small><b>${R$(c.total)}</b><div class="row"><span class="hsub">Despesas ${m ? 'do mês' : 'lançadas'}: ${R$(dsp)}</span><button class="b sm adm" onclick="ajustar('Caixa Geral')">⚖️ Ajustar</button></div></div></div>
   <h4>Caixinhas</h4><div class="grid">${cx('Insumo fixo', 'Insumos')}${cx('Custos gerais', 'CG')}${cx('Mão de obra', 'MO', bt('Sacar', `sacar('MaoObra')`, 'red'))}${cx('Fundo empresa', 'Fundo')}${cx('Luyan', 'Luyan', bt('Sacar', `sacar('Luyan')`, 'red'))}${cx('Beatriz', 'Beatriz', bt('Sacar', `sacar('Beatriz')`, 'red'))}${cx('Gaveta entregas', 'Entrega')}</div>
-  <h4>Resultados ${m ? '(' + m + ')' : ''}</h4>${sec('v', 'Varejo', 'varejo')}${sec('a', 'Atacado pago', 'atacado')}${L.some(x => x.canal === 'evento') ? sec('e', 'Eventos', 'evento') : ''}`;
+  <h4>Resultados ${m ? '(' + m + ')' : ''}</h4>${sec('v', 'Varejo', 'varejo')}${sec('a', 'Atacado pago', 'atacado')}${L.some(x => x.canal === 'evento') ? sec('e', 'Eventos', 'evento') : ''}${graficos(m)}`;
+  const nn = rc.length + pend.length + baixos.length; if ($('bellN')) { $('bellN').textContent = nn; $('bellN').hidden = !nn; $('bell').setAttribute('aria-label', nn ? `Avisos (${nn})` : 'Avisos'); }
   const n = rc.length + pend.length; if ($('bdg')) $('bdg').innerHTML = n ? `<span class="bdg">${n}</span>` : '';
 }
-function avisos(t) {
-  let tit, h; const ir = (id, txt) => `<div class="row"><button class="b" onclick="fechar();irPara('${id}')">${txt}</button></div>`;
-  if (t === 'rc') {
-    const rc = recompra().filter(x => x.alerta); tit = '📞 Clientes para contatar';
-    h = (rc.length ? rc.map(x => `<div class="ai"><div><b>${x.c.nome}</b><small>Último pedido em ${fdata(x.ult)}, há ${x.dias} dias (aviso em ${x.lim})</small></div><div class="row"><a class="b sm" target="_blank" href="${wpp(x.c)}">WhatsApp</a><button class="b sm adm" onclick="contatado(${x.c.id})">✔ Contatado</button></div></div>`).join('') : '<p class="vz">Ninguém para contatar agora. 🎉</p>') + ir('clientes', 'Abrir clientes');
-  } else if (t === 'pend') {
-    const p = db.atacado.filter(atrasado); tit = '⏳ Pedidos vencidos';
-    h = (p.length ? p.map(a => `<div class="ai"><div><b>${a.cliente}</b><small>Pedido #${a.num}, ${R$(a.totalLiquido)}, venceu há ${difDias(a.venc, hoje())} dias</small></div><div class="row"><button class="b sm ok adm" onclick="receber(${a.id})">💰 Receber</button></div></div>`).join('') : '<p class="vz">Nenhum pedido vencido. 🎉</p>') + ir('receber', 'Abrir A receber');
-  } else {
-    const sal = saldos(), bx = Object.keys(ITENS).filter(k => ativo(k) && sal[k] <= minOf(k)); tit = '📦 Estoque baixo';
-    h = (bx.length ? bx.map(k => `<div class="ai"><div><b>${ITENS[k][0]}</b><small>Restam ${r2(sal[k])} ${ITENS[k][1]} (mínimo ${minOf(k)})</small></div></div>`).join('') : '<p class="vz">Estoque em dia. ✅</p>') + ir('estoque', 'Abrir estoque');
-  }
-  info(tit, h);
+const kfmt = v => v >= 1000 ? (v / 1000).toFixed(1).replace('.', ',') + ' mil' : String(Math.round(v));
+function hbars(it, f) { if (!it.length) return '<p class="vz">Sem dados no período.</p>'; const mx = Math.max(...it.map(x => x.v), 1); return it.map(x => `<div class="hb"><span>${x.n}</span><div class="bar" role="presentation"><i style="width:${Math.max(2, x.v / mx * 100)}%"></i></div><b>${f(x.v)}</b></div>`).join(''); }
+function graficos(m) {
+  const T = linhasFin(), pm = {}, noMes = d => !m || (d || '').startsWith(m);
+  T.forEach(x => { const k = (x.data || '').slice(0, 7); if (k) { const o = pm[k] || (pm[k] = { liq: 0, l: 0 }); o.liq += x.liq; o.l += x.l; } });
+  const ms = Object.keys(pm).sort().slice(-6), mx = Math.max(1, ...ms.map(k => pm[k].liq));
+  const cols = ms.map(k => `<div class="gc" role="img" aria-label="${mesTxt(k)}: líquido ${R$(pm[k].liq)}, lucro ${R$(pm[k].l)}"><div class="gb"><i class="ga" style="height:${Math.max(2, pm[k].liq / mx * 100)}%"></i><i class="gv" style="height:${Math.max(0, pm[k].l / mx * 100)}%"></i></div><small>${mesTxt(k).slice(0, 3)}</small><b>${kfmt(pm[k].liq)}</b></div>`).join('');
+  const dp = {}; db.despesas.filter(d => noMes(d.data)).forEach(d => { const k = CATL[catDesp(d)] || catDesp(d); dp[k] = (dp[k] || 0) + dtot(d); });
+  const sb = {}; T.filter(x => noMes(x.data)).forEach(x => (x.sab || []).forEach(([s, n]) => { const k = NS[s] || s; sb[k] = (sb[k] || 0) + num(n); }));
+  const ord = o => Object.entries(o).map(([n, v]) => ({ n, v })).sort((a, b) => b.v - a.v);
+  return `<details class="sec" ${dtog('g')}><summary><span>Gráficos</span><b class="mu">${m ? mesTxt(m) : 'visão geral'}</b></summary><div class="gr">
+  <div class="card"><h3>Faturamento líquido e lucro por mês</h3><div class="leg"><span class="la">Líquido</span><span class="lv">Lucro</span></div>${ms.length ? `<div class="gm">${cols}</div>` : '<p class="vz">Sem vendas ainda.</p>'}</div>
+  <div class="card"><h3>Despesas por categoria</h3>${hbars(ord(dp), R$)}</div>
+  <div class="card"><h3>Pudins vendidos por sabor</h3>${hbars(ord(sb), v => v + ' un')}</div></div><p class="nota">Não inclui o histórico anterior (sem data).</p></details>`;
 }
+function avisoBloco(t) {
+  const ir = (id, txt) => `<div class="row"><button class="b" onclick="fechar();irPara('${id}')">${txt}</button></div>`;
+  if (t === 'rc') {
+    const rc = recompra().filter(x => x.alerta);
+    return ['📞 Clientes para contatar', (rc.length ? rc.map(x => `<div class="ai"><div><b>${x.c.nome}</b><small>Último pedido em ${fdata(x.ult)}, há ${x.dias} dias (aviso em ${x.lim})</small></div><div class="row"><a class="b sm" target="_blank" href="${wpp(x.c)}">WhatsApp</a><button class="b sm adm" onclick="contatado(${x.c.id})">✔ Contatado</button></div></div>`).join('') : '<p class="vz">Ninguém para contatar agora.</p>') + ir('clientes', 'Abrir clientes')];
+  }
+  if (t === 'pend') {
+    const p = db.atacado.filter(atrasado);
+    return ['⏳ Pedidos vencidos', (p.length ? p.map(a => `<div class="ai"><div><b>${a.cliente}</b><small>Pedido #${a.num}, ${R$(a.totalLiquido)}, venceu há ${difDias(a.venc, hoje())} dias</small></div><div class="row"><button class="b sm adm" onclick="cobrar(${a.clienteId})">📤 Cobrar</button><button class="b sm ok adm" onclick="receber(${a.id})">💰 Receber</button></div></div>`).join('') : '<p class="vz">Nenhum pedido vencido.</p>') + ir('receber', 'Abrir A receber')];
+  }
+  const sal = saldos(), bx = Object.keys(ITENS).filter(k => ativo(k) && sal[k] <= minOf(k));
+  return ['📦 Estoque baixo', (bx.length ? bx.map(k => `<div class="ai"><div><b>${ITENS[k][0]}</b><small>Restam ${r2(sal[k])} ${ITENS[k][1]} (mínimo ${minOf(k)})</small></div></div>`).join('') : '<p class="vz">Estoque em dia.</p>') + ir('estoque', 'Abrir estoque')];
+}
+function avisos(t) {
+  if (t === 'all') { const n = bellN(); info('🔔 Avisos', n ? ['rc', 'pend', 'est'].map(avisoBloco).map(b => `<h4>${b[0]}</h4>${b[1]}`).join('') : '<p class="vz">Tudo em dia. Nenhum aviso agora.</p>'); return; }
+  info(...avisoBloco(t));
+}
+const bellN = () => recompra().filter(x => x.alerta).length + db.atacado.filter(atrasado).length + (() => { const s = saldos(); return Object.keys(ITENS).filter(k => ativo(k) && s[k] <= minOf(k)).length; })();
 R.contagem = () => {
   const M = {}; const g = m => M[m] ||= { t: 0, n: 0, b: 0, x: 0, q: 0, br: 0, lq: 0, l: 0, d: 0 };
   linhasFin().forEach(x => { const o = g(x.data.slice(0, 7) || 'Sem data'); x.sab.forEach(([s, q]) => { if (s === 'ninho') o.n += q; else if (s === 'brigadeirao') o.b += q; else if (s === 'tradicional') o.t += q; else o.x += q; }); o.q += x.q; o.br += x.bruto; o.lq += x.liq; o.l += x.l; });
@@ -414,14 +440,14 @@ R.clientes = () => {
     const ps = db.atacado.filter(a => a.clienteId === c.id), tot = ps.reduce((a, x) => a + num(x.totalLiquido), 0), r = rc.find(x => x.c.id === c.id), sb = {}; ps.forEach(p => atItens(p).forEach(i => sb[i.sabor] = (sb[i.sabor] || 0) + num(i.qtd)));
     const fav = Object.entries(sb).sort((a, b) => b[1] - a[1])[0];
     return [`<b>${c.nome}</b>${c.ativo === 'nao' ? ' <span class="tag no">inativo</span>' : ''}`, c.tel, [c.cidade, c.uf].filter(Boolean).join('/') || '-', r ? fdata(r.ult) : '-', r ? `<span class="tag ${r.alerta ? 'no' : 'ok'}">${r.dias}d</span>` : '-', ps.length, R$(tot), ps.length ? R$(tot / ps.length) : '-', fav ? NS[fav[0]] : '-',
-    `<a class="b sm" target="_blank" href="${wpp(c)}">WhatsApp</a>` + bt('📜 Histórico', `histCliente(${c.id})`, 'v') + bt('📄 Recibo em aberto', `reciboAbertos(${c.id})`, 'v') + bt('✏️', `editar('clientes',${c.id})`) + bt(c.ativo === 'nao' ? 'Reativar' : 'Inativar', `toggleAtivo(${c.id})`)];
+    `<a class="b sm" target="_blank" href="${wpp(c)}">WhatsApp</a>` + bt('📜 Histórico', `histCliente(${c.id})`, 'v') + bt('📤 Cobrar', `cobrar(${c.id})`, 'v') + bt('✏️', `editar('clientes',${c.id})`) + bt(c.ativo === 'nao' ? 'Reativar' : 'Inativar', `toggleAtivo(${c.id})`)];
   }), 'Cadastre seu primeiro cliente acima.');
   const av = $('rc-aviso'); av.hidden = !n; av.innerHTML = `📞 ${n} cliente(s) já passaram do prazo de recompra.`;
 };
 R.receber = () => {
   const p = db.atacado.filter(a => a.status !== 'PAGO').sort((a, b) => (a.venc || a.data) < (b.venc || b.data) ? -1 : 1);
   $('rec-k').innerHTML = KB('Total pendente na rua', p.reduce((a, x) => a + num(x.totalLiquido), 0), 'neg') + kpi('Pedidos em aberto', p.length) + kpi('Atrasados', p.filter(atrasado).length);
-  $('rec-t').innerHTML = tbl(['Pedido', 'Data', 'Cliente', 'Qtd', 'Valor', 'Vencimento', 'Situação', 'Ações'], p.map(a => ['#' + a.num, fdata(a.data), a.cliente, a.qtd, R$(a.totalLiquido), fdata(a.venc), `<span class="tag ${atrasado(a) ? 'no' : 'wa'}">${atrasado(a) ? 'Atrasado ' + difDias(a.venc, hoje()) + 'd' : 'Em aberto'}</span>`, bt('💰 Receber', `receber(${a.id})`, 'ok') + bt('📄 Recibo', `reciboPedido(${a.id})`, 'v')]), 'Nenhum pedido em aberto. 🎉');
+  $('rec-t').innerHTML = tbl(['Pedido', 'Data', 'Cliente', 'Qtd', 'Valor', 'Vencimento', 'Situação', 'Ações'], p.map(a => ['#' + a.num, fdata(a.data), a.cliente, a.qtd, R$(a.totalLiquido), fdata(a.venc), `<span class="tag ${atrasado(a) ? 'no' : 'wa'}">${atrasado(a) ? 'Atrasado ' + difDias(a.venc, hoje()) + 'd' : 'Em aberto'}</span>`, bt('📤 Cobrar', `cobrar(${a.clienteId})`, 'v') + bt('💰 Receber', `receber(${a.id})`, 'ok')]), 'Nenhum pedido em aberto. 🎉');
 };
 R.compras = () => rLista('compras');
 R.precos = () => {
@@ -449,7 +475,15 @@ R.config = () => { }; // montada em rConfig() ao abrir a aba
 function ajustar(k) { ask('Ajustar: ' + k, [['d', 'Data', 'date', hoje()], ['op', 'Operação', 'select', 'e', [['e', '➕ Adicionar'], ['s', '➖ Subtrair']]], ['v', 'Valor (R$)', 'number']], r => { let v = num(r.v); if (!v) return toast('Valor inválido.', 1); db.ajustes.push({ id: uid(), caixa: k, data: r.d, valor: r.op === 's' ? -v : v }); guardar(); toast('Ajustado.'); }); }
 function sacar(t) { ask('Saque — ' + t, [['d', 'Data', 'date', hoje()], ['v', 'Valor (R$)', 'number'], ['o', 'Observação', 'text']], r => { if (!num(r.v)) return toast('Valor inválido.', 1); db.pagamentos.push({ id: uid(), data: r.d, tipo: t, valor: num(r.v), obs: r.o }); guardar(); toast('Saque registrado.'); }); }
 function contar(k) { const at = r2(saldos()[k]); ask('Contagem real: ' + ITENS[k][0], [['q', `Quantidade real agora (sistema: ${at} ${ITENS[k][1]})`, 'number', at]], r => { const d = r2(num(r.q) - at); if (!d) return; db.estoqueMov.push({ id: uid(), data: hoje(), tipo: d > 0 ? 'entrada' : 'saida', item: k, qtd: Math.abs(d), desc: 'Contagem real' }); guardar(); toast('Estoque ajustado.'); }); }
-function receber(id) { const a = db.atacado.find(x => x.id === id); if (a && confirm(`Confirmar recebimento de ${R$(a.totalLiquido)} de ${a.cliente}?`)) { a.status = 'PAGO'; a.pagoEm = hoje(); guardar(); toast('Pagamento confirmado!'); if (!$('modal').hidden) avisos('pend'); } }
+const FORMAS = ['PIX', 'Dinheiro', 'Cartão de débito', 'Cartão de crédito', 'Transferência', 'Boleto', 'Outro'].map(f => [f, f]);
+function receber(id) {
+  const a = db.atacado.find(x => x.id === id); if (!a) return;
+  const dosAvisos = !$('modal').hidden && $('m-t').textContent.includes('Pedidos vencidos');
+  ask(`Receber ${R$(a.totalLiquido)} de ${a.cliente}`, [['forma', 'Forma de pagamento', 'select', 'PIX', FORMAS], ['data', 'Data do pagamento', 'date', hoje()]], v => {
+    a.status = 'PAGO'; a.pagoEm = v.data || hoje(); a.formaPag = v.forma; guardar(); toast('Pagamento confirmado. O recibo já pode ser gerado.');
+    if (dosAvisos) avisos('pend');
+  });
+}
 function contatado(id) { const c = db.clientes.find(x => x.id === id); c.contatadoEm = hoje(); guardar(); if (!$('modal').hidden) avisos('rc'); }
 function toggleAtivo(id) { const c = db.clientes.find(x => x.id === id); c.ativo = c.ativo === 'nao' ? 'sim' : 'nao'; guardar(); }
 function histCliente(id) { const c = db.clientes.find(x => x.id === id); info('Histórico — ' + c.nome, tbl(['Data', 'Sabor', 'Qtd', 'Valor', 'Status'], ordenar(db.atacado.filter(a => a.clienteId === id)).map(a => [fdata(a.data), resumoAt(a), a.qtd, R$(a.totalLiquido), a.status === 'PAGO' ? 'Pago' : 'Pendente']))); }
@@ -480,40 +514,96 @@ function pdvFinal() {
 let _logo;
 function logo() { return _logo || (_logo = new Promise(res => { const i = new Image(); i.onload = () => { try { const c = document.createElement('canvas'); c.width = i.naturalWidth; c.height = i.naturalHeight; c.getContext('2d').drawImage(i, 0, 0); res({ u: c.toDataURL('image/png'), w: 26 * i.naturalWidth / i.naturalHeight, h: 26 }); } catch (e) { res(null); } }; i.onerror = () => res(null); i.src = 'assets/logo.png'; })); }
 function reciboPedido(id) {
-  const a = db.atacado.find(x => x.id === id), outros = db.atacado.filter(x => x.clienteId === a.clienteId && x.status !== 'PAGO' && x.id !== id);
-  let ids = [id]; if (outros.length && confirm(`${a.cliente} tem mais ${outros.length} pedido(s) em aberto. Incluir todos neste recibo?`)) ids = ids.concat(outros.map(x => x.id));
-  recibo(a.clienteId, ids);
+  const a = db.atacado.find(x => x.id === id); if (!a) return;
+  if (a.status !== 'PAGO') return toast('O recibo só pode ser gerado depois que o pedido for pago.', 1);
+  if (a.formaPag) return recibo(a.clienteId, [id]);
+  ask('Forma de pagamento', [['forma', 'Este pedido foi pago antes de registrarmos a forma de pagamento. Como foi pago?', 'select', 'PIX', FORMAS]], v => { a.formaPag = v.forma; guardar(); recibo(a.clienteId, [id]); });
 }
-function reciboAbertos(cid) { const ids = db.atacado.filter(a => a.clienteId === cid && a.status !== 'PAGO').map(a => a.id); if (!ids.length) return toast('Cliente sem pedidos em aberto.', 1); recibo(cid, ids); }
-async function recibo(cid, ids) {
-  const { jsPDF } = window.jspdf, d = new jsPDF(), c = db.clientes.find(x => x.id === cid) || { nome: 'Cliente' };
-  const ps = db.atacado.filter(a => ids.includes(a.id)).sort((a, b) => a.data < b.data ? -1 : 1); if (!ps.length) return;
+/* ---------- COBRANÇA: imagem padrão (PNG) com todos os pedidos em aberto do cliente ---------- */
+const carregaImg = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('imagem ' + src)); i.src = src; });
+async function cobrancaImagem(c, ps) {
+  const [lg, fx] = await Promise.all([carregaImg('assets/logo.png'), carregaImg('assets/faixa.png')]);
+  try { await Promise.all([document.fonts.load("800 32px Montserrat"), document.fonts.load("600 26px Montserrat"), document.fonts.load("76px Staatliches")]); } catch (e) { }
+  const W = 1080, P = 56, FT = "'Montserrat', system-ui, sans-serif", FD = "'Staatliches', 'Montserrat', sans-serif", TX = '#62351E', MU = '#7A5A44', BR = '#953707', GO = '#E09340', BD = '#EBD5B0', RD = '#A53A25';
+  const caixa = (ctx, x, y, w, h, fill, line) => { const r = 22; ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); if (line) { ctx.strokeStyle = line; ctx.lineWidth = 2; ctx.stroke(); } };
+  const desenha = (ctx, seco) => {
+    const T = (t, x, y, f, cor, al = 'left') => { if (seco) return; ctx.font = f; ctx.fillStyle = cor; ctx.textAlign = al; ctx.fillText(t, x, y); };
+    const fit = (t, mw, f) => { ctx.font = f; let s = String(t); if (ctx.measureText(s).width <= mw) return s; while (s.length > 2 && ctx.measureText(s + '…').width > mw) s = s.slice(0, -1); return s + '…'; };
+    const box = (...a) => { if (!seco) caixa(ctx, ...a); };
+    let y = 56; const lw = 330, lh = lg.naturalHeight * lw / lg.naturalWidth;
+    if (!seco) ctx.drawImage(lg, (W - lw) / 2, y, lw, lh); y += lh + 18;
+    T(`CNPJ ${EMP.cnpj}   •   ${EMP.tel}`, W / 2, y + 22, `600 26px ${FT}`, MU, 'center'); y += 56;
+    if (!seco) { ctx.strokeStyle = GO; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(P, y); ctx.lineTo(W - P, y); ctx.stroke(); } y += 26;
+    T('COBRANÇA', W / 2, y + 64, `78px ${FD}`, BR, 'center'); y += 86;
+    T(`Emitida em ${fdata(hoje())}`, W / 2, y + 22, `600 24px ${FT}`, MU, 'center'); y += 54;
+    const ch = c.tel ? 150 : 112; box(P, y, W - 2 * P, ch, '#FFFFFF', BD);
+    T('CLIENTE', P + 30, y + 40, `800 20px ${FT}`, MU); T(fit(c.nome, W - 2 * P - 60, `800 40px ${FT}`), P + 30, y + 86, `800 40px ${FT}`, TX);
+    if (c.tel) T(`Tel.: ${c.tel}`, P + 30, y + 126, `500 26px ${FT}`, MU); y += ch + 24;
+    ps.forEach(a => {
+      const its = atItens(a), dc = num(a.desconto) > 0, n = its.length + (dc ? 1 : 0), h = 160 + n * 42, R = W - P - 30; box(P, y, W - 2 * P, h, '#FFFFFF', BD);
+      let yy = y + 62; const atr = atrasado(a);
+      T(`Pedido #${a.num}  •  ${fdata(a.data)}`, P + 30, yy, `800 30px ${FT}`, BR);
+      T(atr ? `Atrasado ${difDias(a.venc, hoje())} dias` : (a.venc ? `Vence em ${fdata(a.venc)}` : 'Em aberto'), R, yy, `700 24px ${FT}`, atr ? RD : MU, 'right'); yy += 50;
+      its.forEach(i => { T(fit(`${i.qtd}x ${NS[i.sabor] || i.sabor}`, 620, `500 28px ${FT}`), P + 30, yy, `500 28px ${FT}`, TX); T(R$(num(i.qtd) * num(i.unitario)), R, yy, `600 28px ${FT}`, TX, 'right'); yy += 42; });
+      if (dc) { T('Desconto logística', P + 30, yy, `500 26px ${FT}`, MU); T('−' + R$(a.desconto), R, yy, `600 26px ${FT}`, MU, 'right'); yy += 42; }
+      if (!seco) { ctx.strokeStyle = BD; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(P + 30, yy - 24); ctx.lineTo(R, yy - 24); ctx.stroke(); }
+      T('Total do pedido', P + 30, yy + 14, `700 26px ${FT}`, MU); T(R$(a.totalLiquido), R, yy + 16, `800 34px ${FT}`, BR, 'right'); y += h + 18;
+    });
+    const tot = ps.reduce((s, a) => s + num(a.totalLiquido), 0); y += 6; box(P, y, W - 2 * P, 214, BR);
+    T('TOTAL EM ABERTO', W / 2, y + 54, `700 26px ${FT}`, '#F5DDB8', 'center'); T(R$(tot), W / 2, y + 144, `800 86px ${FT}`, '#FFFFFF', 'center'); T(`${ps.length} pedido${ps.length > 1 ? 's' : ''}`, W / 2, y + 188, `600 24px ${FT}`, '#F5DDB8', 'center'); y += 214 + 24;
+    box(P, y, W - 2 * P, 236, '#FFF3DC', GO);
+    T('PAGUE VIA PIX', W / 2, y + 70, `58px ${FD}`, BR, 'center'); T('Chave Pix (e-mail)', W / 2, y + 112, `600 24px ${FT}`, MU, 'center');
+    T(fit(EMP.pix, W - 2 * P - 60, `800 44px ${FT}`), W / 2, y + 168, `800 44px ${FT}`, TX, 'center'); T('Envie o comprovante após o pagamento.', W / 2, y + 208, `500 24px ${FT}`, MU, 'center'); y += 236 + 34;
+    T('Obrigado pela preferência!', W / 2, y + 10, `600 28px ${FT}`, TX, 'center'); y += 50;
+    const fh = fx.naturalHeight * W / fx.naturalWidth; if (!seco) ctx.drawImage(fx, 0, y, W, fh); return y + fh;
+  };
+  const H = Math.ceil(desenha(document.createElement('canvas').getContext('2d'), true)), cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d'), g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#FFFDF8'); g.addColorStop(1, '#FFF1DD'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  desenha(ctx, false);
+  return new Promise((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error('toBlob')), 'image/png'));
+}
+let _cob = null;
+async function cobrar(cid) {
+  const c = db.clientes.find(x => x.id === cid) || { nome: 'Cliente' }, ps = db.atacado.filter(a => a.clienteId === cid && a.status !== 'PAGO').sort((a, b) => a.data < b.data ? -1 : 1);
+  if (!ps.length) return toast('Esse cliente não tem pedidos em aberto.', 1);
+  toast('Gerando a cobrança...');
+  try {
+    const blob = await cobrancaImagem(c, ps); if (_cob) URL.revokeObjectURL(_cob.url);
+    const nome = `Cobranca_${c.nome.replace(/\s+/g, '_')}_${hoje()}.png`, url = URL.createObjectURL(blob); _cob = { blob, nome, url };
+    const pode = !!(navigator.canShare && navigator.canShare({ files: [new File([blob], nome, { type: 'image/png' })] }));
+    info('Cobrança pronta', `<img class="cob-img" src="${url}" alt="Cobrança para ${c.nome}: ${ps.length} pedido(s) em aberto"><div class="row">${pode ? '<button class="b pri" onclick="cobEnviar()">📤 Compartilhar</button>' : ''}<a class="b ${pode ? '' : 'pri'}" href="${url}" download="${nome}">Baixar imagem</a></div>`);
+  } catch (e) { console.error('cobrança em imagem falhou', e); toast('Não consegui gerar a imagem. Gerando em PDF.', 1); recibo(cid, ps.map(p => p.id), 'cobranca'); }
+}
+async function cobEnviar() { try { await navigator.share({ files: [new File([_cob.blob], _cob.nome, { type: 'image/png' })], title: 'Cobrança Pudim Du Cariri' }); } catch (e) { if (e.name !== 'AbortError') toast('Não foi possível compartilhar. Use "Baixar imagem".', 1); } }
+async function recibo(cid, ids, modo = 'recibo') {
+  const cob = modo === 'cobranca', { jsPDF } = window.jspdf, d = new jsPDF(), c = db.clientes.find(x => x.id === cid) || { nome: 'Cliente' };
+  const ps = db.atacado.filter(a => ids.includes(a.id) && (cob ? a.status !== 'PAGO' : a.status === 'PAGO')).sort((a, b) => a.data < b.data ? -1 : 1); if (!ps.length) return toast(cob ? 'Sem pedidos em aberto.' : 'O recibo só é gerado para pedidos pagos.', 1);
   const lg = await logo(); let x0 = 14; if (lg) { d.addImage(lg.u, 'PNG', 14, 10, lg.w, lg.h); x0 = 14 + lg.w + 6; }
   d.setFont('helvetica', 'bold'); d.setFontSize(17); d.text(EMP.fantasia, x0, 18); d.setFont('helvetica', 'normal'); d.setFontSize(9);
   d.text(`CNPJ: ${EMP.cnpj}`, x0, 24); d.text(`Telefone: ${EMP.tel}  |  Pix (e-mail): ${EMP.pix}`, x0, 29);
   d.setDrawColor(194, 150, 80); d.line(14, 40, 196, 40);
-  d.setFont('helvetica', 'bold'); d.setFontSize(14); d.text('RECIBO', 14, 50); d.setFont('helvetica', 'normal'); d.setFontSize(9);
+  d.setFont('helvetica', 'bold'); d.setFontSize(14); d.text(cob ? 'COBRANÇA' : 'RECIBO', 14, 50); d.setFont('helvetica', 'normal'); d.setFontSize(9);
   d.text(`No ${hoje().replace(/-/g, '')}-${ps[0].num}   Emitido em ${fdata(hoje())}`, 196, 50, { align: 'right' });
   d.text(`Cliente: ${c.nome}`, 14, 58); d.text(`Telefone: ${c.tel || '-'}`, 14, 63);
   d.text(`Endereco: ${[c.endereco, [c.cidade, c.uf].filter(Boolean).join('/')].filter(Boolean).join(' - ') || '-'}`.replace('Endereco', 'Endereço'), 14, 68);
   let y = 80; d.setFillColor(62, 31, 18); d.rect(14, y - 5, 182, 8, 'F'); d.setTextColor(255); d.setFont('helvetica', 'bold');
-  [['Data', 16], ['Sabor', 40], ['Qtd', 104], ['Unit.', 120], ['Subtotal', 146], ['Status', 176]].forEach(([t, x]) => d.text(t, x, y));
+  [['Data', 16], ['Sabor', 40], ['Qtd', 104], ['Unit.', 120], ['Subtotal', 146], [cob ? 'Situação' : 'Status', 176]].forEach(([t, x]) => d.text(t, x, y));
   d.setTextColor(0); d.setFont('helvetica', 'normal'); y += 8;
   ps.forEach(a => {
     atItens(a).forEach(i => {
       if (y > 265) { d.addPage(); y = 20; }
-      [[fdata(a.data), 16], [NS[i.sabor] || i.sabor, 40], [String(i.qtd), 104], [R$(i.unitario), 120], [R$(num(i.qtd) * num(i.unitario)), 146], [a.status === 'PAGO' ? 'PAGO' : 'PENDENTE', 176]].forEach(([t, x]) => d.text(t, x, y));
+      [[fdata(a.data), 16], [NS[i.sabor] || i.sabor, 40], [String(i.qtd), 104], [R$(i.unitario), 120], [R$(num(i.qtd) * num(i.unitario)), 146], [cob ? (atrasado(a) ? 'ATRASADO' : 'ABERTO') : 'PAGO', 176]].forEach(([t, x]) => d.text(t, x, y));
       y += 6;
     });
     if (num(a.desconto) > 0) { d.text('Desconto logística', 40, y); d.text('-' + R$(a.desconto), 146, y); y += 6; }
+    if (!cob) { d.setTextColor(90); d.text(`Pago em ${fdata(a.pagoEm || a.data)} - ${a.formaPag || 'forma não informada'}`, 40, y); d.setTextColor(0); y += 6; }
     d.setDrawColor(226, 232, 240); d.line(14, y - 2, 196, y - 2); y += 3;
   });
-  const T = ps.reduce((a, p) => a + num(p.totalLiquido), 0), P = ps.filter(p => p.status === 'PAGO').reduce((a, p) => a + num(p.totalLiquido), 0);
+  const T = ps.reduce((a, p) => a + num(p.totalLiquido), 0);
   y += 4; if (y > 255) { d.addPage(); y = 20; }
-  d.setFont('helvetica', 'bold'); d.text(`Total: ${R$(T)}`, 196, y, { align: 'right' }); d.text(`Pago: ${R$(P)}`, 196, y + 6, { align: 'right' });
-  d.setTextColor(T - P > 0 ? 200 : 0, 0, 0); d.setFontSize(12); d.text(`A pagar: ${R$(T - P)}`, 196, y + 14, { align: 'right' });
-  d.setTextColor(0); d.setFontSize(9); d.setFont('helvetica', 'normal'); d.text(`Pagamento via Pix - chave e-mail: ${EMP.pix}`, 14, 285); d.text('Obrigado pela preferência!', 196, 285, { align: 'right' });
-  d.save(`Recibo_${c.nome.replace(/\s+/g, '_')}_${hoje()}.pdf`);
+  d.setFont('helvetica', 'bold'); d.setFontSize(12); d.setTextColor(cob ? 200 : 0, 0, 0); d.text(`${cob ? 'A pagar' : 'Total pago'}: ${R$(T)}`, 196, y, { align: 'right' });
+  d.setTextColor(0); d.setFontSize(9); d.setFont('helvetica', 'normal'); if (cob) d.text(`Pagamento via Pix - chave e-mail: ${EMP.pix}`, 14, 285); d.text('Obrigado pela preferência!', 196, 285, { align: 'right' });
+  d.save(`${cob ? 'Cobranca' : 'Recibo'}_${c.nome.replace(/\s+/g, '_')}_${hoje()}.pdf`);
 }
 
 /* CONFIG */
