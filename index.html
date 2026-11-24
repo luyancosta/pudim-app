@@ -8,15 +8,17 @@
 <link rel="icon" href="assets/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Staatliches&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/ds.css">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
-<div id="toast"></div>
+<a class="skip" href="#conteudo">Ir para o conteúdo</a>
+<div id="toast" role="status" aria-live="polite"></div>
 
-<div id="modal" class="mb" hidden>
+<div id="modal" class="mb" hidden role="dialog" aria-modal="true" aria-labelledby="m-t">
   <div class="mx">
     <h3 id="m-t"></h3>
     <div id="m-b"></div>
@@ -39,13 +41,14 @@
 <div id="app" hidden>
   <aside id="side">
     <div class="brand"><img src="assets/logo.png" alt="Pudim Du Cariri"></div>
-    <nav id="nav"></nav>
+    <nav id="nav" aria-label="Menu principal"></nav>
+    <button id="colapsa" class="side-toggle" onclick="toggleSide()" aria-expanded="true" title="Recolher menu"><span class="ic" aria-hidden="true">«</span><span class="nt">Recolher menu</span></button>
     <div class="user"><small>Conectado como</small><span id="user"></span></div>
   </aside>
-  <main>
+  <main id="conteudo" tabindex="-1">
     <header>
-      <button class="b menu" onclick="document.getElementById('side').classList.toggle('open')">☰</button>
-      <img src="assets/logo.png" alt="" class="hlogo"><h2 id="titulo"></h2>
+      <button class="b menu" aria-label="Abrir menu" onclick="document.getElementById('side').classList.toggle('open')">☰</button>
+      <img src="assets/logo.png" alt="" class="hlogo"><div class="hd"><small id="crumb"></small><h2 id="titulo"></h2></div>
       <div class="row">
         <span id="sync" class="sync">●</span>
         <button class="b adm" onclick="exportar()">Backup</button>
@@ -56,7 +59,7 @@
   </main>
 </div>
 
-<nav id="bnav">
+<nav id="bnav" aria-label="Navegação rápida">
 <button data-t="dashboard" onclick="switchTab('dashboard')">📊<span>Painel</span></button>
 <button data-t="estoque" onclick="switchTab('estoque')">🏭<span>Estoque</span></button>
 <button data-t="vendas" onclick="switchTab('vendas')">🛒<span>Varejo</span></button>
