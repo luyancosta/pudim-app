@@ -84,7 +84,7 @@ const CFG0 = {
   precoUnd: 15, precoCombo: 40, custoCopo: 1.5, taxaCredIns: 4.98, taxaCredApr: 3.09, taxaDebIns: 1.99, taxaDebApr: 0.89, taxaOnline: 2.99, diasAviso: 7,
   insumo: { varejo: { tradicional: 6.22, ninho: 7.29, brigadeirao: 6.96 }, atacado: { tradicional: 5.12, ninho: 6.19, brigadeirao: 5.86 } },
   ficha: { lc: 6.5, li: 4.5, ov: 14, ac: 4, cp: 1.5, tp: 1.2, ad: .55, sc: .9, co: .2, lp: 40, nt: 75, cl: 10, ch: 60, gr: 40 },
-  abasViewer: { dashboard: true, contagem: true, estoque: true }, setupFeito: false,
+  abasViewer: { dashboard: true, contagem: true, estoque: true }, setupFeito: false, validadePudins: 20, validadeAviso: 2,
   legado: {
     varejo: { bruto: 28063.00, liq: 25839.10, ent: 774.00, q: 1977, ins: 12394.96, cg: 2139.77, mo: 2953.12, l: 8351.24, fundo: 1088.82, lu: 3880.82, bea: 2675.96, giro: 705.64 },
     atacado: { bruto: 42665.22, ent: -495.82, liq: 42169.40, q: 3904, ins: 21605.84, cg: 3398.80, mo: 4458.73, l: 12706.03, fundo: 1691.37, lu: 5987.80, bea: 4134.94, giro: 891.92 }
@@ -199,7 +199,9 @@ function recompra() {
   }).filter(Boolean);
 }
 const wpp = c => { const d = (c.tel || '').replace(/\D/g, ''); return 'https://wa.me/' + (d.length <= 11 ? '55' + d : d) + '?text=' + encodeURIComponent(`Oi, ${c.nome}, tudo bem? Aqui é do Pudim Du Cariri 🍮 Como está o estoque de pudins por aí? Posso separar seu próximo pedido?`); };
-const atrasado = a => a.status !== 'PAGO' && a.venc && a.venc < hoje();
+/* PAGAMENTO em atraso = pedido não pago depois do prazo ('Pagar até'). A VALIDADE (a.venc) é só dos pudins. */
+const atrasado = a => a.status !== 'PAGO' && a.prazoPag && a.prazoPag < hoje();
+const atrasoTxt = a => `PAGAMENTO EM ATRASO DESDE ${fdata(addDias(a.prazoPag, 1))}`;
 
 /* ============ CRUD GENÉRICO ============ */
 const optCli = () => db.clientes.filter(c => c.ativo !== 'nao').map(c => [c.id, c.nome]);
@@ -210,9 +212,9 @@ const SCH = {
   clientes: { t: 'Cliente', custom: 1, req: ['nome', 'tel'], f: [['nome', 'Nome do cliente', 'text'], ['tel', 'Telefone (com DDD)', 'tel'], ['endereco', 'Endereço (rua, número, bairro)', 'text'], ['cidade', 'Cidade', 'text'], ['uf', 'Estado (UF)', 'text'], ['prazo', 'Prazo de recompra em dias (vazio = padrão)', 'number'], ['obs', 'Observações', 'text']] },
   atacado: {
     t: 'Pedido de atacado', extra: () => `<h4>Sabores do pedido</h4><div id="at-itens"></div><div class="row"><button type="button" class="b sm" onclick="addItem()">+ Adicionar sabor</button></div>`,
-    f: [['data', 'Data do pedido', 'date'], ['clienteId', 'Cliente', 'select', optCli], ['copos', 'Copos devolvidos', 'number', null, 0], ['desconto', 'Desconto logística (vazio = automático)', 'number'], ['status', 'Status', 'select', [['NÃO PAGO', 'Pendente'], ['PAGO', 'Pago']]], ['venc', 'Vencimento (opcional)', 'date', null, '']],
-    h: ['#', 'Data', 'Cliente', 'Sabores', 'Qtd', 'Líquido', 'Status'],
-    r: a => ['#' + a.num, fdata(a.data), a.cliente, resumoAt(a), a.qtd, R$(a.totalLiquido), `<span class="tag ${a.status === 'PAGO' ? 'ok' : 'no'}">${a.status === 'PAGO' ? 'Pago' : (atrasado(a) ? 'Atrasado' : 'Pendente')}</span>`],
+    f: [['data', 'Data do pedido', 'date'], ['clienteId', 'Cliente', 'select', optCli], ['copos', 'Copos devolvidos', 'number', null, 0], ['desconto', 'Desconto logística (vazio = automático)', 'number'], ['status', 'Status', 'select', [['NÃO PAGO', 'Pendente'], ['PAGO', 'Pago']]], ['prazoPag', 'Pagar até (prazo de pagamento, opcional)', 'date'], ['venc', 'Validade dos pudins deste pedido (opcional)', 'date', null, '']],
+    h: ['#', 'Data', 'Cliente', 'Sabores', 'Qtd', 'Líquido', 'Validade dos pudins', 'Status'],
+    r: a => ['#' + a.num, fdata(a.data), a.cliente, resumoAt(a), a.qtd, R$(a.totalLiquido), a.venc ? fdata(a.venc) : '-', `<span class="tag ${a.status === 'PAGO' ? 'ok' : 'no'}">${a.status === 'PAGO' ? 'Pago' : (atrasado(a) ? atrasoTxt(a) : 'Pendente')}</span>`],
     ex: a => a.status === 'PAGO' ? bt('📄 Recibo', `reciboPedido(${a.id})`, 'v') : bt('📤 Cobrar', `cobrar(${a.clienteId})`, 'v') + bt('💰 Receber', `receber(${a.id})`, 'ok'),
     pre: o => {
       const c = db.clientes.find(x => x.id == o.clienteId); if (!c) { toast('Cadastre e escolha um cliente.', 1); return false; }
@@ -338,7 +340,7 @@ const H = {
   atacado: () => lista('atacado'), clientes: () => `<div class="alert" id="rc-aviso" hidden></div>${lista('clientes').replace('<div id="lista-clientes"></div>', '')}<div id="clientes-tab"></div>`,
   receber: () => `<div class="grid" id="rec-k"></div><div id="rec-t"></div>`,
   compras: () => lista('compras'), precos: () => `<div id="precos-body"></div>`,
-  estoque: () => `<div class="grid" id="est-k"></div><div id="est-prev"></div><div class="fg"><div>${lista('producoes')}</div><div>${lista('estoqueMov')}</div></div>`,
+  estoque: () => `<div id="val-t"></div><div class="grid" id="est-k"></div><div id="est-prev"></div><div class="fg"><div>${lista('producoes')}</div><div>${lista('estoqueMov')}</div></div>`,
   despesas: () => lista('despesas'), saques: () => lista('pagamentos'),
   eventos: () => lista('eventos') + '<h4>Resultado por evento</h4><div id="ev-rel"></div>',
   rateio: () => `<h4>Varejo</h4><div id="rt-v"></div><h4>Atacado (pedidos pagos)</h4><div id="rt-a"></div>`,
@@ -371,13 +373,13 @@ function rDash0() {
     return `<details class="sec" ${dtog(key)}><summary><span>${tit}</span><b class="${s('l') < -0.004 ? 'neg' : ''}">${R$(s('l'))}<small> lucro</small></b></summary><div class="grid">${ordem}${K('Qtd vendida', s('q'))}${KB('Insumo fixo', s('ins'))}${KB('Custos gerais', s('cg'))}${KB('Mão de obra', s('mo'))}${KB('Lucro líquido', s('l'), 'ok')}${K('Fundo empresa', R$(s('fundo')))}${K('Luyan', R$(s('lu')))}${K('Beatriz', R$(s('bea')))}${g.giro ? K('Giro (legado)', R$(g.giro)) : ''}</div></details>`;
   };
   const chip = (ic, n, lb, k) => n ? `<button class="chip ${k}" onclick="avisos('${k}')"><span>${ic}</span>${lb}<i>${n}</i></button>` : '';
-  const chips = chip('📞', rc.length, 'Contatar', 'rc') + chip('⏳', pend.length, 'Vencidos', 'pend') + chip('📦', baixos.length, 'Estoque baixo', 'est');
+  const chips = chip('📞', rc.length, 'Contatar', 'rc') + chip('⏳', pend.length, 'Pagamento em atraso', 'pend') + chip('⌛', lotesAlerta().length, 'Validade no estoque', 'val') + chip('📦', baixos.length, 'Estoque baixo', 'est');
   $('dash-body').innerHTML = `
   ${chips ? `<div class="chips">${chips}</div>` : ''}
   <div class="grid"><div class="k big ${c.total < -0.004 ? 'neg' : ''}"><small>Dinheiro total disponível em conta</small><b>${R$(c.total)}</b><div class="row"><span class="hsub">Despesas ${m ? 'do mês' : 'lançadas'}: ${R$(dsp)}</span><button class="b sm adm" onclick="ajustar('Caixa Geral')">⚖️ Ajustar</button></div></div></div>
   <h4>Caixinhas</h4><div class="grid">${cx('Insumo fixo', 'Insumos')}${cx('Custos gerais', 'CG')}${cx('Mão de obra', 'MO', bt('Sacar', `sacar('MaoObra')`, 'red'))}${cx('Fundo empresa', 'Fundo')}${cx('Luyan', 'Luyan', bt('Sacar', `sacar('Luyan')`, 'red'))}${cx('Beatriz', 'Beatriz', bt('Sacar', `sacar('Beatriz')`, 'red'))}${cx('Gaveta entregas', 'Entrega')}</div>
   <h4>Resultados ${m ? '(' + m + ')' : ''}</h4>${sec('v', 'Varejo', 'varejo')}${sec('a', 'Atacado pago', 'atacado')}${L.some(x => x.canal === 'evento') ? sec('e', 'Eventos', 'evento') : ''}${graficos(m)}`;
-  const nn = rc.length + pend.length + baixos.length; if ($('bellN')) { $('bellN').textContent = nn; $('bellN').hidden = !nn; $('bell').setAttribute('aria-label', nn ? `Avisos (${nn})` : 'Avisos'); }
+  const nn = rc.length + pend.length + baixos.length + lotesAlerta().length; if ($('bellN')) { $('bellN').textContent = nn; $('bellN').hidden = !nn; $('bell').setAttribute('aria-label', nn ? `Avisos (${nn})` : 'Avisos'); }
   const n = rc.length + pend.length; if ($('bdg')) $('bdg').innerHTML = n ? `<span class="bdg">${n}</span>` : '';
 }
 const kfmt = v => v >= 1000 ? (v / 1000).toFixed(1).replace('.', ',') + ' mil' : String(Math.round(v));
@@ -403,16 +405,17 @@ function avisoBloco(t) {
   }
   if (t === 'pend') {
     const p = db.atacado.filter(atrasado);
-    return ['⏳ Pedidos vencidos', (p.length ? p.map(a => `<div class="ai"><div><b>${a.cliente}</b><small>Pedido #${a.num}, ${R$(a.totalLiquido)}, venceu há ${difDias(a.venc, hoje())} dias</small></div><div class="row"><button class="b sm adm" onclick="cobrar(${a.clienteId})">📤 Cobrar</button><button class="b sm ok adm" onclick="receber(${a.id})">💰 Receber</button></div></div>`).join('') : '<p class="vz">Nenhum pedido vencido.</p>') + ir('receber', 'Abrir A receber')];
+    return ['⏳ Pagamento em atraso', (p.length ? p.map(a => `<div class="ai"><div><b>${a.cliente}</b><small>Pedido #${a.num}, ${R$(a.totalLiquido)}, ${atrasoTxt(a)} (${difDias(addDias(a.prazoPag, 1), hoje())} dias em atraso)</small></div><div class="row"><button class="b sm adm" onclick="cobrar(${a.clienteId})">📤 Cobrar</button><button class="b sm ok adm" onclick="receber(${a.id})">💰 Receber</button></div></div>`).join('') : '<p class="vz">Nenhum pedido vencido.</p>') + ir('receber', 'Abrir A receber')];
   }
+  if (t === 'val') { const L = lotesAlerta(); return ['⌛ Validade dos pudins', (L.length ? L.map(l => `<div class="ai"><div><b>${NS[l.sab] || l.sab}: ${l.n} un</b><small>Produzido em ${fdata(l.data)}, validade em ${fdata(l.venc)}</small></div><span class="tag ${l.dias < 0 ? 'no' : 'wa'}">${validadeTxt(l.dias)}</span></div>`).join('') : '<p class="vz">Nenhum lote perto de vencer.</p>') + ir('estoque', 'Abrir estoque')]; }
   const sal = saldos(), bx = Object.keys(ITENS).filter(k => ativo(k) && sal[k] <= minOf(k));
   return ['📦 Estoque baixo', (bx.length ? bx.map(k => `<div class="ai"><div><b>${ITENS[k][0]}</b><small>Restam ${r2(sal[k])} ${ITENS[k][1]} (mínimo ${minOf(k)})</small></div></div>`).join('') : '<p class="vz">Estoque em dia.</p>') + ir('estoque', 'Abrir estoque')];
 }
 function avisos(t) {
-  if (t === 'all') { const n = bellN(); info('🔔 Avisos', n ? ['rc', 'pend', 'est'].map(avisoBloco).map(b => `<h4>${b[0]}</h4>${b[1]}`).join('') : '<p class="vz">Tudo em dia. Nenhum aviso agora.</p>'); return; }
+  if (t === 'all') { const n = bellN(); info('🔔 Avisos', n ? ['rc', 'pend', 'val', 'est'].map(avisoBloco).map(b => `<h4>${b[0]}</h4>${b[1]}`).join('') : '<p class="vz">Tudo em dia. Nenhum aviso agora.</p>'); return; }
   info(...avisoBloco(t));
 }
-const bellN = () => recompra().filter(x => x.alerta).length + db.atacado.filter(atrasado).length + (() => { const s = saldos(); return Object.keys(ITENS).filter(k => ativo(k) && s[k] <= minOf(k)).length; })();
+const bellN = () => lotesAlerta().length + recompra().filter(x => x.alerta).length + db.atacado.filter(atrasado).length + (() => { const s = saldos(); return Object.keys(ITENS).filter(k => ativo(k) && s[k] <= minOf(k)).length; })();
 R.contagem = () => {
   const M = {}; const g = m => M[m] ||= { t: 0, n: 0, b: 0, x: 0, q: 0, br: 0, lq: 0, l: 0, d: 0 };
   linhasFin().forEach(x => { const o = g(x.data.slice(0, 7) || 'Sem data'); x.sab.forEach(([s, q]) => { if (s === 'ninho') o.n += q; else if (s === 'brigadeirao') o.b += q; else if (s === 'tradicional') o.t += q; else o.x += q; }); o.q += x.q; o.br += x.bruto; o.lq += x.liq; o.l += x.l; });
@@ -445,9 +448,9 @@ R.clientes = () => {
   const av = $('rc-aviso'); av.hidden = !n; av.innerHTML = `📞 ${n} cliente(s) já passaram do prazo de recompra.`;
 };
 R.receber = () => {
-  const p = db.atacado.filter(a => a.status !== 'PAGO').sort((a, b) => (a.venc || a.data) < (b.venc || b.data) ? -1 : 1);
-  $('rec-k').innerHTML = KB('Total pendente na rua', p.reduce((a, x) => a + num(x.totalLiquido), 0), 'neg') + kpi('Pedidos em aberto', p.length) + kpi('Atrasados', p.filter(atrasado).length);
-  $('rec-t').innerHTML = tbl(['Pedido', 'Data', 'Cliente', 'Qtd', 'Valor', 'Vencimento', 'Situação', 'Ações'], p.map(a => ['#' + a.num, fdata(a.data), a.cliente, a.qtd, R$(a.totalLiquido), fdata(a.venc), `<span class="tag ${atrasado(a) ? 'no' : 'wa'}">${atrasado(a) ? 'Atrasado ' + difDias(a.venc, hoje()) + 'd' : 'Em aberto'}</span>`, bt('📤 Cobrar', `cobrar(${a.clienteId})`, 'v') + bt('💰 Receber', `receber(${a.id})`, 'ok')]), 'Nenhum pedido em aberto. 🎉');
+  const p = db.atacado.filter(a => a.status !== 'PAGO').sort((a, b) => (a.prazoPag || a.data) < (b.prazoPag || b.data) ? -1 : 1);
+  $('rec-k').innerHTML = KB('Total pendente na rua', p.reduce((a, x) => a + num(x.totalLiquido), 0), 'neg') + kpi('Pedidos em aberto', p.length) + kpi('Pagamento em atraso', p.filter(atrasado).length);
+  $('rec-t').innerHTML = tbl(['Pedido', 'Data', 'Cliente', 'Qtd', 'Valor', 'Pagar até', 'Validade dos pudins', 'Situação', 'Ações'], p.map(a => ['#' + a.num, fdata(a.data), a.cliente, a.qtd, R$(a.totalLiquido), a.prazoPag ? fdata(a.prazoPag) : '-', a.venc ? fdata(a.venc) : '-', `<span class="tag ${atrasado(a) ? 'no' : 'wa'}">${atrasado(a) ? atrasoTxt(a) : 'Em aberto'}</span>`, bt('📤 Cobrar', `cobrar(${a.clienteId})`, 'v') + bt('💰 Receber', `receber(${a.id})`, 'ok')]), 'Nenhum pedido em aberto. 🎉');
 };
 R.compras = () => rLista('compras');
 R.precos = () => {
@@ -464,7 +467,7 @@ function previsao() {
   return `<h4>Previsão de produção da semana (média das últimas 4 semanas)</h4>${tbl(['Sabor', 'Venda média/semana', 'Estoque pronto', 'Receitas a bater'], rows)}<h4>Lista de compras sugerida</h4>${tbl(['Item', 'Saldo', 'Comprar'], compras, 'Estoque suficiente para a previsão. ✅')}`;
 }
 R.estoque = () => {
-  const s = saldos();
+  const s = saldos(); rValidade();
   $('est-k').innerHTML = Object.keys(ITENS).filter(ativo).map(k => { const v = r2(s[k]), c = v <= 0 ? 'neg' : ''; return `<div class="k ${c}" style="${v > 0 && v <= minOf(k) ? 'border-left-color:#F59E0B' : ''}"><small>${ITENS[k][0]}</small><b>${v} ${ITENS[k][1]}</b><div class="row">${bt('Contagem', `contar('${k}')`)}</div></div>`; }).join('');
   const ina = Object.keys(ITENS).filter(k => !ativo(k)); $('est-prev').innerHTML = (ina.length ? `<div class="card" style="color:var(--mu)">Inativos (fora dos alertas): ${ina.map(k => ITENS[k][0]).join(', ')}. Reative em Configurações.</div>` : '') + previsao(); rLista('producoes'); rLista('estoqueMov');
 };
@@ -478,7 +481,7 @@ function contar(k) { const at = r2(saldos()[k]); ask('Contagem real: ' + ITENS[k
 const FORMAS = ['PIX', 'Dinheiro', 'Cartão de débito', 'Cartão de crédito', 'Transferência', 'Boleto', 'Outro'].map(f => [f, f]);
 function receber(id) {
   const a = db.atacado.find(x => x.id === id); if (!a) return;
-  const dosAvisos = !$('modal').hidden && $('m-t').textContent.includes('Pedidos vencidos');
+  const dosAvisos = !$('modal').hidden && $('m-t').textContent.includes('Pagamento em atraso');
   ask(`Receber ${R$(a.totalLiquido)} de ${a.cliente}`, [['forma', 'Forma de pagamento', 'select', 'PIX', FORMAS], ['data', 'Data do pagamento', 'date', hoje()]], v => {
     a.status = 'PAGO'; a.pagoEm = v.data || hoje(); a.formaPag = v.forma; guardar(); toast('Pagamento confirmado. O recibo já pode ser gerado.');
     if (dosAvisos) avisos('pend');
@@ -519,7 +522,7 @@ function reciboPedido(id) {
   if (a.formaPag) return recibo(a.clienteId, [id]);
   ask('Forma de pagamento', [['forma', 'Este pedido foi pago antes de registrarmos a forma de pagamento. Como foi pago?', 'select', 'PIX', FORMAS]], v => { a.formaPag = v.forma; guardar(); recibo(a.clienteId, [id]); });
 }
-/* ---------- COBRANÇA: imagem padrão (PNG) com todos os pedidos em aberto do cliente ---------- */
+/* ---------- PEDIDOS EM ABERTO: imagem padrão (PNG) gerada pelo botão Cobrar ---------- */
 const carregaImg = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('imagem ' + src)); i.src = src; });
 async function cobrancaImagem(c, ps) {
   const [lg, fx] = await Promise.all([carregaImg('assets/logo.png'), carregaImg('assets/faixa.png')]);
@@ -534,16 +537,17 @@ async function cobrancaImagem(c, ps) {
     if (!seco) ctx.drawImage(lg, (W - lw) / 2, y, lw, lh); y += lh + 18;
     T(`CNPJ ${EMP.cnpj}   •   ${EMP.tel}`, W / 2, y + 22, `600 26px ${FT}`, MU, 'center'); y += 56;
     if (!seco) { ctx.strokeStyle = GO; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(P, y); ctx.lineTo(W - P, y); ctx.stroke(); } y += 26;
-    T('COBRANÇA', W / 2, y + 64, `78px ${FD}`, BR, 'center'); y += 86;
+    T('Pedidos em Aberto', W / 2, y + 64, `78px ${FD}`, BR, 'center'); y += 86;
     T(`Emitida em ${fdata(hoje())}`, W / 2, y + 22, `600 24px ${FT}`, MU, 'center'); y += 54;
     const ch = c.tel ? 150 : 112; box(P, y, W - 2 * P, ch, '#FFFFFF', BD);
     T('CLIENTE', P + 30, y + 40, `800 20px ${FT}`, MU); T(fit(c.nome, W - 2 * P - 60, `800 40px ${FT}`), P + 30, y + 86, `800 40px ${FT}`, TX);
     if (c.tel) T(`Tel.: ${c.tel}`, P + 30, y + 126, `500 26px ${FT}`, MU); y += ch + 24;
     ps.forEach(a => {
-      const its = atItens(a), dc = num(a.desconto) > 0, n = its.length + (dc ? 1 : 0), h = 160 + n * 42, R = W - P - 30; box(P, y, W - 2 * P, h, '#FFFFFF', BD);
+      const its = atItens(a), dc = num(a.desconto) > 0, n = its.length + (dc ? 1 : 0), atr0 = atrasado(a), pl = atr0 ? atrasoTxt(a) : (a.prazoPag ? `Pagar até ${fdata(a.prazoPag)}` : ''), h = 160 + n * 42 + (pl ? 38 : 0), R = W - P - 30; box(P, y, W - 2 * P, h, '#FFFFFF', BD);
       let yy = y + 62; const atr = atrasado(a);
       T(`Pedido #${a.num}  •  ${fdata(a.data)}`, P + 30, yy, `800 30px ${FT}`, BR);
-      T(atr ? `Atrasado ${difDias(a.venc, hoje())} dias` : (a.venc ? `Vence em ${fdata(a.venc)}` : 'Em aberto'), R, yy, `700 24px ${FT}`, atr ? RD : MU, 'right'); yy += 50;
+      T(a.venc ? `Validade dos pudins: ${fdata(a.venc)}` : '', R, yy, `700 24px ${FT}`, MU, 'right');
+      if (pl) { yy += 38; T(pl, P + 30, yy, `800 24px ${FT}`, atr ? RD : MU); } yy += 50;
       its.forEach(i => { T(fit(`${i.qtd}x ${NS[i.sabor] || i.sabor}`, 620, `500 28px ${FT}`), P + 30, yy, `500 28px ${FT}`, TX); T(R$(num(i.qtd) * num(i.unitario)), R, yy, `600 28px ${FT}`, TX, 'right'); yy += 42; });
       if (dc) { T('Desconto logística', P + 30, yy, `500 26px ${FT}`, MU); T('−' + R$(a.desconto), R, yy, `600 26px ${FT}`, MU, 'right'); yy += 42; }
       if (!seco) { ctx.strokeStyle = BD; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(P + 30, yy - 24); ctx.lineTo(R, yy - 24); ctx.stroke(); }
@@ -566,15 +570,15 @@ let _cob = null;
 async function cobrar(cid) {
   const c = db.clientes.find(x => x.id === cid) || { nome: 'Cliente' }, ps = db.atacado.filter(a => a.clienteId === cid && a.status !== 'PAGO').sort((a, b) => a.data < b.data ? -1 : 1);
   if (!ps.length) return toast('Esse cliente não tem pedidos em aberto.', 1);
-  toast('Gerando a cobrança...');
+  toast('Gerando a imagem...');
   try {
     const blob = await cobrancaImagem(c, ps); if (_cob) URL.revokeObjectURL(_cob.url);
-    const nome = `Cobranca_${c.nome.replace(/\s+/g, '_')}_${hoje()}.png`, url = URL.createObjectURL(blob); _cob = { blob, nome, url };
+    const nome = `Pedidos_em_aberto_${c.nome.replace(/\s+/g, '_')}_${hoje()}.png`, url = URL.createObjectURL(blob); _cob = { blob, nome, url };
     const pode = !!(navigator.canShare && navigator.canShare({ files: [new File([blob], nome, { type: 'image/png' })] }));
-    info('Cobrança pronta', `<img class="cob-img" src="${url}" alt="Cobrança para ${c.nome}: ${ps.length} pedido(s) em aberto"><div class="row">${pode ? '<button class="b pri" onclick="cobEnviar()">📤 Compartilhar</button>' : ''}<a class="b ${pode ? '' : 'pri'}" href="${url}" download="${nome}">Baixar imagem</a></div>`);
+    info('Pedidos em aberto', `<img class="cob-img" src="${url}" alt="Pedidos em aberto de ${c.nome}: ${ps.length} pedido(s)"><div class="row">${pode ? '<button class="b pri" onclick="cobEnviar()">📤 Compartilhar</button>' : ''}<a class="b ${pode ? '' : 'pri'}" href="${url}" download="${nome}">Baixar imagem</a></div>`);
   } catch (e) { console.error('cobrança em imagem falhou', e); toast('Não consegui gerar a imagem. Gerando em PDF.', 1); recibo(cid, ps.map(p => p.id), 'cobranca'); }
 }
-async function cobEnviar() { try { await navigator.share({ files: [new File([_cob.blob], _cob.nome, { type: 'image/png' })], title: 'Cobrança Pudim Du Cariri' }); } catch (e) { if (e.name !== 'AbortError') toast('Não foi possível compartilhar. Use "Baixar imagem".', 1); } }
+async function cobEnviar() { try { await navigator.share({ files: [new File([_cob.blob], _cob.nome, { type: 'image/png' })], title: 'Pedidos em aberto - Pudim Du Cariri' }); } catch (e) { if (e.name !== 'AbortError') toast('Não foi possível compartilhar. Use "Baixar imagem".', 1); } }
 async function recibo(cid, ids, modo = 'recibo') {
   const cob = modo === 'cobranca', { jsPDF } = window.jspdf, d = new jsPDF(), c = db.clientes.find(x => x.id === cid) || { nome: 'Cliente' };
   const ps = db.atacado.filter(a => ids.includes(a.id) && (cob ? a.status !== 'PAGO' : a.status === 'PAGO')).sort((a, b) => a.data < b.data ? -1 : 1); if (!ps.length) return toast(cob ? 'Sem pedidos em aberto.' : 'O recibo só é gerado para pedidos pagos.', 1);
@@ -582,7 +586,7 @@ async function recibo(cid, ids, modo = 'recibo') {
   d.setFont('helvetica', 'bold'); d.setFontSize(17); d.text(EMP.fantasia, x0, 18); d.setFont('helvetica', 'normal'); d.setFontSize(9);
   d.text(`CNPJ: ${EMP.cnpj}`, x0, 24); d.text(`Telefone: ${EMP.tel}  |  Pix (e-mail): ${EMP.pix}`, x0, 29);
   d.setDrawColor(194, 150, 80); d.line(14, 40, 196, 40);
-  d.setFont('helvetica', 'bold'); d.setFontSize(14); d.text(cob ? 'COBRANÇA' : 'RECIBO', 14, 50); d.setFont('helvetica', 'normal'); d.setFontSize(9);
+  d.setFont('helvetica', 'bold'); d.setFontSize(14); d.text(cob ? 'PEDIDOS EM ABERTO' : 'RECIBO', 14, 50); d.setFont('helvetica', 'normal'); d.setFontSize(9);
   d.text(`No ${hoje().replace(/-/g, '')}-${ps[0].num}   Emitido em ${fdata(hoje())}`, 196, 50, { align: 'right' });
   d.text(`Cliente: ${c.nome}`, 14, 58); d.text(`Telefone: ${c.tel || '-'}`, 14, 63);
   d.text(`Endereco: ${[c.endereco, [c.cidade, c.uf].filter(Boolean).join('/')].filter(Boolean).join(' - ') || '-'}`.replace('Endereco', 'Endereço'), 14, 68);
@@ -592,7 +596,7 @@ async function recibo(cid, ids, modo = 'recibo') {
   ps.forEach(a => {
     atItens(a).forEach(i => {
       if (y > 265) { d.addPage(); y = 20; }
-      [[fdata(a.data), 16], [NS[i.sabor] || i.sabor, 40], [String(i.qtd), 104], [R$(i.unitario), 120], [R$(num(i.qtd) * num(i.unitario)), 146], [cob ? (atrasado(a) ? 'ATRASADO' : 'ABERTO') : 'PAGO', 176]].forEach(([t, x]) => d.text(t, x, y));
+      [[fdata(a.data), 16], [NS[i.sabor] || i.sabor, 40], [String(i.qtd), 104], [R$(i.unitario), 120], [R$(num(i.qtd) * num(i.unitario)), 146], [cob ? (atrasado(a) ? 'EM ATRASO' : 'ABERTO') : 'PAGO', 176]].forEach(([t, x]) => d.text(t, x, y));
       y += 6;
     });
     if (num(a.desconto) > 0) { d.text('Desconto logística', 40, y); d.text('-' + R$(a.desconto), 146, y); y += 6; }
@@ -603,7 +607,7 @@ async function recibo(cid, ids, modo = 'recibo') {
   y += 4; if (y > 255) { d.addPage(); y = 20; }
   d.setFont('helvetica', 'bold'); d.setFontSize(12); d.setTextColor(cob ? 200 : 0, 0, 0); d.text(`${cob ? 'A pagar' : 'Total pago'}: ${R$(T)}`, 196, y, { align: 'right' });
   d.setTextColor(0); d.setFontSize(9); d.setFont('helvetica', 'normal'); if (cob) d.text(`Pagamento via Pix - chave e-mail: ${EMP.pix}`, 14, 285); d.text('Obrigado pela preferência!', 196, 285, { align: 'right' });
-  d.save(`${cob ? 'Cobranca' : 'Recibo'}_${c.nome.replace(/\s+/g, '_')}_${hoje()}.pdf`);
+  d.save(`${cob ? 'Pedidos_em_aberto' : 'Recibo'}_${c.nome.replace(/\s+/g, '_')}_${hoje()}.pdf`);
 }
 
 /* CONFIG */
@@ -619,6 +623,7 @@ function rConfig() {
   <div><label>Aviso de recompra (dias, padrão)</label>${inp('c-diasAviso', 'select', C.diasAviso, [[7, '7 dias'], [15, '15 dias']])}</div></div><div class="row"><button class="b pri" onclick="salvarCfg()">Salvar configurações</button></div></div>
   ${cfgFicha()}
   ${cfgLegado()}
+  ${cfgValidade()}
   <div class="card"><h3>Abas que a Beatriz pode ver</h3><div class="fg">${TABS.filter(t => t[0] !== 'config').map(t => `<label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" id="av-${t[0]}" ${C.abasViewer[t[0]] ? 'checked' : ''}> ${t[2]}</label>`).join('')}</div><div class="row"><button class="b pri" onclick="salvarAbas()">Salvar permissões</button></div></div>
   ${C.setupFeito || db.ajustes.length ? '' : `<div class="card"><h3>Saldo inicial (valores dos prints — confira)</h3><div class="fg">${SI_C.map(([k, v]) => `<div><label>Caixinha ${k} (R$)</label>${inp('si-c-' + k, 'number', v)}</div>`).join('')}${Object.keys(SI_E).map(k => `<div><label>${ITENS[k][0]} (${ITENS[k][1]})</label>${inp('si-e-' + k, 'number', SI_E[k])}</div>`).join('')}</div><div class="row"><button class="b pri" onclick="aplicarSaldo()">Aplicar saldo inicial (uma vez)</button></div></div>`}
   ${cfgSabores()}
@@ -871,6 +876,36 @@ function cfgLegado() {
   return `<div class="card"><h3>Histórico anterior (valores antigos)</h3><p style="color:var(--mu)">Somados só nos Resultados do painel (quando o filtro de mês está em "Todos"). Não mexem nas caixinhas.</p>${[['varejo', 'Varejo'], ['atacado', 'Atacado']].map(([c, n]) => `<h4>${n}</h4><div class="fg">${LGK.map(([k, l]) => `<div><label>${l}</label>${inp('lg-' + c + '-' + k, 'number', num(G[c][k]))}</div>`).join('')}</div>`).join('')}<div class="row"><button class="b pri" onclick="salvarLegado()">Salvar histórico anterior</button></div></div>`;
 }
 function salvarLegado() { ['varejo', 'atacado'].forEach(c => LGK.forEach(([k]) => db.config.legado[c][k] = num($('lg-' + c + '-' + k).value))); guardar(); toast('Histórico anterior salvo.'); }
+
+/* ============ VALIDADE DOS PUDINS (por lote de produção) ============ */
+const validadeDias = () => Math.max(1, Math.round(num(db.config.validadePudins)) || 20), validadeAviso = () => Math.max(0, Math.round(num(db.config.validadeAviso)));
+const addDias = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+const validadeTxt = d => d < 0 ? `vencido há ${-d} dia${-d > 1 ? 's' : ''}` : d === 0 ? 'vence hoje' : d === 1 ? 'vence amanhã' : `vence em ${d} dias`;
+function lotesEstoque() {
+  const sal = saldos(), out = [], vd = validadeDias();
+  Object.keys(REC).forEach(sb => {
+    const r = REC[sb]; let resta = Math.max(0, Math.round(num(sal[r.prod]))); if (!resta) return;
+    db.producoes.filter(p => p.sabor === sb).sort((a, b) => (b.data || '') < (a.data || '') ? -1 : (b.data || '') > (a.data || '') ? 1 : b.id - a.id).forEach(p => {
+      if (resta <= 0) return; const n = Math.min(num(p.qtd) * r.rende + num(p.extra), resta), venc = addDias(p.data, vd); resta -= n;
+      out.push({ sab: sb, data: p.data, n, venc, dias: difDias(hoje(), venc) });
+    });
+    if (resta > 0) out.push({ sab: sb, data: '', n: resta, venc: '', dias: null });
+  });
+  return out.sort((a, b) => (a.venc || '9999') < (b.venc || '9999') ? -1 : 1);
+}
+const lotesAlerta = () => lotesEstoque().filter(l => l.venc && l.dias <= validadeAviso());
+function rValidade() {
+  const el = $('val-t'); if (!el) return;
+  const L = lotesEstoque(), al = lotesAlerta().length, ab = dashOpen.val ?? al > 0;
+  el.innerHTML = `<details class="sec" ${ab ? 'open' : ''} ontoggle="dashOpen['val']=this.open"><summary><span>Validade dos pudins</span><b class="${al ? 'neg' : ''}">${al ? al + (al > 1 ? ' lotes em alerta' : ' lote em alerta') : 'em dia'}</b></summary><div class="vbox">${tbl(['Sabor', 'Produzido em', 'Em estoque', 'Validade', 'Situação'], L.map(l => [NS[l.sab] || l.sab, l.data ? fdata(l.data) : 'não registrado', l.n + ' un', l.venc ? fdata(l.venc) : '-', l.venc ? `<span class="tag ${l.dias < 0 ? 'no' : l.dias <= validadeAviso() ? 'wa' : 'ok'}">${validadeTxt(l.dias)}</span>` : '<span class="tag wa">sem lote registrado</span>']), 'Nenhum pudim em estoque agora.')}</div></details>`;
+}
+function cfgValidade() {
+  return `<div class="card"><h3>Validade dos pudins</h3><p style="color:var(--mu)">Cada produção vira um lote, e a validade conta a partir do dia da produção. O app considera que os pudins mais antigos são vendidos primeiro.</p><div class="fg"><div><label for="cv-dias">Validade (dias após a produção)</label>${inp('cv-dias', 'number', validadeDias())}</div><div><label for="cv-aviso">Avisar quando faltar (dias)</label>${inp('cv-aviso', 'number', validadeAviso())}</div></div><div class="row"><button class="b pri" onclick="salvarValidade()">Salvar validade</button></div></div>`;
+}
+function salvarValidade() {
+  const d = Math.round(num($('cv-dias').value)); if (d < 1) return toast('Informe a validade em dias (mínimo 1).', 1);
+  db.config.validadePudins = d; db.config.validadeAviso = Math.max(0, Math.round(num($('cv-aviso').value))); guardar(); toast('Validade salva.');
+}
 
 /* ============ NAVEGAÇÃO / INICIALIZAÇÃO ============ */
 const visiveis = () => TABS.filter(t => role === 'admin' || (t[0] !== 'config' && db.config.abasViewer[t[0]]));
