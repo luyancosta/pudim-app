@@ -31,9 +31,10 @@ const ICONS = {
   'check-circle': '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/>',
   search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>', undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
   send: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+  hourglass: '<path d="M5 22h14M5 2h14M17 22v-4.17a2 2 0 0 0-.59-1.41L12 12l-4.41 4.42A2 2 0 0 0 7 17.83V22M7 2v4.17a2 2 0 0 0 .59 1.41L12 12l4.41-4.42A2 2 0 0 0 17 6.17V2"/>',
   sort: '<path d="m21 16-4 4-4-4M17 20V4M3 8l4-4 4 4M7 4v16"/>'
 };
-const EMO = { '✏': 'pencil', '🗑': 'trash', '⚖': 'scale', '📦': 'package', '🎄': 'calendar', '🛒': 'cart', '📄': 'file', '💰': 'banknote', '📞': 'phone', '📊': 'dashboard', '🏭': 'factory', '💸': 'wallet', '🔒': 'lock', '➕': 'plus', '☰': 'menu', '👥': 'users', '🧾': 'receipt', '📈': 'trending', '🔢': 'hash', '🏧': 'banknote', '🕘': 'history', '⚙': 'sliders', '✔': 'check', '📜': 'history', '🔎': 'search', '↩': 'undo', '⏳': 'clock', '🔔': 'bell', '✕': 'x', '➖': 'minus', '✅': 'check-circle', '↕': 'sort', '📤': 'send' };
+const EMO = { '✏': 'pencil', '🗑': 'trash', '⚖': 'scale', '📦': 'package', '🎄': 'calendar', '🛒': 'cart', '📄': 'file', '💰': 'banknote', '📞': 'phone', '📊': 'dashboard', '🏭': 'factory', '💸': 'wallet', '🔒': 'lock', '➕': 'plus', '☰': 'menu', '👥': 'users', '🧾': 'receipt', '📈': 'trending', '🔢': 'hash', '🏧': 'banknote', '🕘': 'history', '⚙': 'sliders', '✔': 'check', '📜': 'history', '🔎': 'search', '↩': 'undo', '⏳': 'clock', '🔔': 'bell', '✕': 'x', '➖': 'minus', '✅': 'check-circle', '↕': 'sort', '📤': 'send', '⌛': 'hourglass' };
 const svg = (n, c = '') => `<svg class="i ${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 const _alt = Object.keys(EMO).join('|'), RT = new RegExp(_alt), RG = new RegExp('(?:' + _alt + ')\\uFE0F?', 'g');
 const _esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
