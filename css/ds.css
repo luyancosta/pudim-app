@@ -98,3 +98,9 @@ th[aria-sort=ascending]::after{content:' ▲';opacity:1}th[aria-sort=descending]
 @media(max-width:700px){.hb{grid-template-columns:1fr auto}.hb .bar{grid-column:1/-1;order:3}.gr{padding:0 10px}}
 th:has(.th-s){padding-top:0;padding-bottom:0}.th-s{min-height:40px}
 .cob-img{display:block;width:100%;max-height:62vh;object-fit:contain;border-radius:12px;border:1px solid var(--bd);margin-bottom:12px;background:var(--cream)}
+/* cabeçalho em uma linha só, com o sino */
+.vbox{padding:0 12px 12px}.vbox .tw{margin-bottom:0}
+header .row{flex-wrap:nowrap;gap:6px;margin-top:0}
+header h2{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:900px){header{gap:6px}header .b{padding-left:10px;padding-right:10px}.hlogo{height:32px}header h2{font-size:1.05rem}.menu{padding:0 12px}}
+@media(max-width:400px){.hlogo{display:none}}
